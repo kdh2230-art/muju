@@ -108,6 +108,30 @@ def latest_ultra_base(now):
     return t.strftime("%Y%m%d"), f"{t.hour:02d}30"
 
 
+class NoData(Exception):
+    """발표 직후 등으로 해당 발표분 자료가 아직 없을 때"""
+
+
+def short_bases(now):
+    """단기예보 발표 후보: [가장 최근, 직전] (발표 약 10분 뒤부터 조회 가능)"""
+    hours = [2, 5, 8, 11, 14, 17, 20, 23]
+    t = now - timedelta(minutes=10)
+    cands = [h for h in hours if h <= t.hour]
+    day, h = (t, cands[-1]) if cands else (t - timedelta(days=1), 23)
+    out = [(day.strftime("%Y%m%d"), f"{h:02d}00")]
+    i = hours.index(h)
+    pday, ph = (day, hours[i - 1]) if i > 0 else (day - timedelta(days=1), 23)
+    out.append((pday.strftime("%Y%m%d"), f"{ph:02d}00"))
+    return out
+
+
+def ultra_bases(now):
+    """초단기예보 발표 후보: [가장 최근, 직전] (매시 30분 발표, 약 45분 뒤부터 조회 가능)"""
+    t = now - timedelta(minutes=45)
+    p = t - timedelta(hours=1)
+    return [(t.strftime("%Y%m%d"), f"{t.hour:02d}30"), (p.strftime("%Y%m%d"), f"{p.hour:02d}30")]
+
+
 def _fetch(endpoint, nx, ny, base_date, base_time, rows):
     url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/" + endpoint
     params = {
@@ -118,9 +142,18 @@ def _fetch(endpoint, nx, ny, base_date, base_time, rows):
     last = None
     for attempt in range(3):  # 일시적 실패 대비 3회 재시도
         try:
-            r = requests.get(url, params=params, timeout=30)
+            r = requests.get(url, params=params, timeout=25)
             r.raise_for_status()
-            items = r.json()["response"]["body"]["items"]["item"]
+            try:
+                j = r.json()
+            except Exception:
+                raise RuntimeError("JSON이 아닌 응답: " + r.text[:150].replace("\n", " "))
+            head = j["response"]["header"]
+            if head.get("resultCode") != "00":
+                if head.get("resultCode") == "03":
+                    raise NoData("03 NO_DATA")
+                raise RuntimeError(f'{head.get("resultCode")} {head.get("resultMsg")}')
+            items = j["response"]["body"]["items"]["item"]
             acc = {}
             for i in items:
                 if i["category"] in ("PTY", "TMP", "T1H", "PCP", "RN1", "SNO"):
@@ -129,9 +162,11 @@ def _fetch(endpoint, nx, ny, base_date, base_time, rows):
             return {k: (v["PTY"], v.get("TMP", v.get("T1H")), clean_amt(v.get("PCP", v.get("RN1"))),
                         clean_amt(v.get("SNO")))
                     for k, v in acc.items() if "PTY" in v}
+        except NoData:
+            raise
         except Exception as e:
             last = e
-            time.sleep(2)
+            time.sleep(2 * (attempt + 1))
     raise last
 
 
@@ -206,6 +241,17 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
 #elist label{display:inline-block;margin:2px 10px 2px 0;font-weight:700;cursor:pointer}
 #etext{width:100%;height:150px;box-sizing:border-box;margin-top:8px;font:12px/1.4 ui-monospace,Consolas,monospace}
 #ecopy{margin-top:8px;border:0;background:#111827;color:#fff;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer}
+.chip{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
+  vertical-align:middle;margin-left:8px}
+.chip.u{background:#dbeafe;color:#1e40af}
+.chip.s{background:#e5e7eb;color:#374151}
+#upd{cursor:pointer}
+#warn{font-size:12px;font-weight:700;color:#b45309;margin-top:6px;line-height:1.4}
+#meta{font-size:11px;color:#4b5563;margin-top:10px;line-height:1.7;border-top:1px solid #e5e7eb;padding-top:8px}
+#panel td.t.u{box-shadow:inset 4px 0 0 #2563eb}
+#panel td.t.s{box-shadow:inset 4px 0 0 #d1d5db}
+#panel td.sep{font-size:10px;font-weight:800;color:#1e40af;background:#eff6ff;padding:3px 9px;
+  border-top:1px dashed #93c5fd;border-bottom:1px dashed #93c5fd}
 @media (max-width:700px){
   #edit{left:8px;right:8px;bottom:8px;width:auto}
   #etext{height:110px}
@@ -216,9 +262,11 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   #tmp{margin-top:4px}
   #head .row{margin-top:8px}
   #head .row button{height:34px}
-  #legend{margin-top:6px}
+  #legend{display:none;margin-top:6px}
+  #meta{display:none;margin-top:6px;padding-top:5px;font-size:10.5px}
+  #head.info #meta,#head.info #legend{display:block}
   .leaflet-control-zoom{display:none}
-  #panel{top:auto;left:0;right:0;bottom:0;max-height:40vh;border-radius:16px 16px 0 0}
+  #panel{top:auto;left:0;right:0;bottom:0;max-height:36vh;border-radius:16px 16px 0 0}
   #grab{display:block;text-align:center;font-size:12px;font-weight:700;color:#6b7280;padding:9px 0 7px;cursor:pointer}
   #panel.min #scroll{display:none}
   #panel th{font-size:10px;padding:7px 1px}
@@ -227,12 +275,14 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
 }
 </style>
 <div id="head" class="card">
-  <div class="top"><span class="ttl">출근길 눈·비 예보</span><span id="upd">__UPDATED__</span></div>
-  <div id="when"></div>
+  <div class="top"><span class="ttl">기상정보</span><span id="upd">__UPDATED__</span></div>
+  <div id="when"><span id="wt"></span><span id="kind" class="chip"></span></div>
   <div id="sum"></div>
   <div id="tmp"></div>
+  <div id="warn"></div>
   <div class="row"><button id="prev">◀</button><input type="range" id="rng"><button id="next">▶</button></div>
-  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음<br>큰 숫자는 기온(℃), 작은 글씨는 시간당 강수량(mm)·적설(cm)</div>
+  <div id="meta"></div>
+  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음 &nbsp;? 조회 실패<br>큰 숫자는 기온(℃), 작은 글씨는 시간당 강수량(mm)·적설(cm)<br>시각 옆 <span style="color:#2563eb;font-weight:800">파란 띠</span>=초단기예보, <span style="color:#9ca3af;font-weight:800">회색 띠</span>=단기예보</div>
 </div>
 <div id="edit" class="card">
   <h3>📍 위치 수정 모드</h3>
@@ -251,7 +301,7 @@ JS = """
 window.addEventListener('load', function() {
   var MAP = __MAP__;
   var PLACES = __PLACES__, TIMES = __TIMES__, KEYS = __KEYS__, TD = __TD__;
-  var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__;
+  var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__, ULTRA = __ULTRA__, META = __META__;
   var ICON = {'3':'❄','7':'❄','2':'🌨','6':'🌨','1':'💧','4':'💧','5':'💧'};
   function amt(p, i) {
     var a = [];
@@ -262,6 +312,16 @@ window.addEventListener('load', function() {
   function fmt(t) { return (t === null || t === undefined) ? '' : String(t).replace('-', '−') + '°'; }
 
   L.control.zoom({position: 'bottomleft'}).addTo(MAP);
+
+  // 지도 범위를 한반도로 제한 (세계지도 반복/먼 바깥은 안 보이게)
+  MAP.options.zoomSnap = 0.1;
+  try {
+    var KB = L.latLngBounds([[33.0, 124.0], [43.1, 131.9]]);
+    MAP.options.maxBoundsViscosity = 1.0;
+    MAP.setMaxBounds(KB);
+    var mz = MAP.getBoundsZoom(KB, true);
+    if (isFinite(mz)) MAP.setMinZoom(mz);
+  } catch (e) {}
   var mk = [], rows = [];
   PLACES.forEach(function(p) {
     var c = L.circleMarker([p.lat, p.lon], {radius: 8, color: '#fff', weight: 2.5, fillOpacity: 1}).addTo(MAP);
@@ -273,7 +333,7 @@ window.addEventListener('load', function() {
 
   var tbl = document.createElement('table');
   var h = '<tr><th>시각</th>';
-  PLACES.forEach(function(p) { h += '<th>' + p.name + '</th>'; });
+  PLACES.forEach(function(p) { h += '<th>' + p.name + (META.ultra_fail.indexOf(p.name) >= 0 ? ' ⚠' : '') + '</th>'; });
   tbl.innerHTML = h + '</tr>';
   var lastDate = '';
   TD.forEach(function(t, i) {
@@ -283,7 +343,7 @@ window.addEventListener('load', function() {
       dc.colSpan = PLACES.length + 1; dc.className = 'd'; dc.textContent = t[0];
     }
     var tr = tbl.insertRow(); tr.className = 'r';
-    var c0 = tr.insertCell(); c0.className = 't'; c0.textContent = t[1];
+    var c0 = tr.insertCell(); c0.className = 't ' + (ULTRA[i] ? 'u' : 's'); c0.textContent = t[1];
     PLACES.forEach(function(p) {
       var code = p.codes[i], c = tr.insertCell(), tp = fmt(p.temps[i]);
       if (code === '?') tp = '?'; else if (!tp && code === '0') tp = '·';
@@ -296,6 +356,11 @@ window.addEventListener('load', function() {
     });
     tr.onclick = function() { show(i); };
     rows.push(tr);
+    if (ULTRA[i] && i + 1 < TD.length && !ULTRA[i + 1]) {  // 초단기 구간이 끝나는 지점 표시
+      var sc = tbl.insertRow().insertCell();
+      sc.colSpan = PLACES.length + 1; sc.className = 'sep';
+      sc.textContent = '▲ 여기까지 초단기예보 · ▼ 아래는 단기예보';
+    }
   });
   document.getElementById('scroll').appendChild(tbl);
 
@@ -306,12 +371,31 @@ window.addEventListener('load', function() {
   grab.onclick = function() {
     var min = panel.classList.toggle('min');
     grab.textContent = min ? '▴ 시간별 표 보기' : '▾ 시간별 표 접기';
+    if (!min && rows[cur] && rows[cur].scrollIntoView) rows[cur].scrollIntoView({block: 'nearest'});
   };
 
+  // 예보 발표 시각 / 초단기 구간 / 대체 여부 안내
+  var mt = '<div><span class="chip u" style="margin-left:0">초단기</span> ' +
+           (META.ultra ? '<b>' + META.ultra + '</b> 발표 · ' + META.ultra_range : '<b>조회 실패</b> (단기예보로 대체)') + '</div>' +
+           '<div><span class="chip s" style="margin-left:0">단기</span> <b>' + META.short + '</b> 발표 · 초단기 이후 구간과 적설(cm)</div>';
+  if (META.ultra_old) mt += '<div>※ 최신 초단기 발표가 아직 없어 직전 발표를 사용 중</div>';
+  if (META.short_old) mt += '<div>※ 최신 단기 발표가 아직 없어 직전 발표를 사용 중</div>';
+  document.getElementById('meta').innerHTML = mt;
+  var wn = [];
+  if (META.fail.length) wn.push('❌ 조회 실패(?): ' + META.fail.join(', '));
+  if (META.ultra_fail.length) wn.push('⚠ 초단기 조회 실패 → 단기예보로 대체: ' + META.ultra_fail.join(', '));
+  document.getElementById('warn').innerHTML = wn.join('<br>');
+  document.getElementById('upd').onclick = function() { head.classList.toggle('info'); };
+
+  var mobile0 = window.innerWidth <= 700;
+  if (mobile0) { panel.classList.add('min'); grab.textContent = '▴ 시간별 표 보기'; }
   var cur = 0;
   function show(i) {
     i = Math.max(0, Math.min(TIMES.length - 1, i)); cur = i; rng.value = i;
-    document.getElementById('when').textContent = TIMES[i];
+    document.getElementById('wt').textContent = TIMES[i];
+    var kd = document.getElementById('kind');
+    kd.textContent = ULTRA[i] ? '초단기' : '단기';
+    kd.className = 'chip ' + (ULTRA[i] ? 'u' : 's');
     rows.forEach(function(r, k) { r.classList.toggle('sel', k === i); });
     if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: 'nearest'});
 
@@ -359,9 +443,10 @@ window.addEventListener('load', function() {
     var mobile = window.innerWidth <= 700;
     var b = L.latLngBounds(PLACES.map(function(p) { return [p.lat, p.lon]; }));
     MAP.fitBounds(b, {
-      paddingTopLeft: [mobile ? 20 : head.offsetWidth + 50, mobile ? head.offsetHeight + 24 : 50],
-      paddingBottomRight: [(mobile ? 20 : panel.offsetWidth + 40) + 80, mobile ? panel.offsetHeight + 24 : 50],
-      maxZoom: 11
+      paddingTopLeft: [mobile ? 16 : head.offsetWidth + 50, mobile ? head.offsetHeight + 18 : 50],
+      paddingBottomRight: [(mobile ? 16 : panel.offsetWidth + 40) + (mobile ? 64 : 80),
+                           mobile ? panel.offsetHeight + 18 : 50],
+      maxZoom: 12
     });
   } catch (e) {}
 
@@ -410,33 +495,64 @@ def main():
     now = now_kst()
     start = now.replace(minute=0, second=0, microsecond=0)
     limit = now + timedelta(hours=HOURS_AHEAD)
-    s_date, s_time = latest_base(now)
-    u_date, u_time = latest_ultra_base(now)
-    print(f"현재(한국시간) {now:%m/%d %H:%M} / 단기예보 발표 {s_date} {s_time} / 초단기예보 발표 {u_date} {u_time}\n")
+    sbases, ubases = short_bases(now), ultra_bases(now)
+    print(f"현재(한국시간) {now:%m/%d %H:%M} / 단기예보 후보 {sbases} / 초단기예보 후보 {ubases}\n")
     if not SERVICE_KEY:
         print("인증키가 없습니다. key.txt 에 키를 저장하거나 SERVICE_KEY 환경변수를 설정하세요.")
         sys.exit(1)
 
-    data = {}
-    for name, (lat, lon) in PLACES.items():
+    def fetch_first(endpoint, nx, ny, bases, rows):
+        """최신 발표분을 먼저 시도하고, 아직 자료가 없으면 직전 발표분 사용"""
+        last = None
+        for idx, (d, t) in enumerate(bases):
+            try:
+                return _fetch(endpoint, nx, ny, d, t, rows), (d, t), idx
+            except Exception as e:
+                last = e
+        raise last
+
+    def load(name):
+        lat, lon = PLACES[name]
         nx, ny = latlon_to_grid(lat, lon)
-        try:
-            merged = _fetch("getVilageFcst", nx, ny, s_date, s_time, 2000)
-        except Exception as e:
-            print(f"{name}: 조회 실패 ({e})")
-            data[name] = {}
-            continue
+        merged, sb, sidx = fetch_first("getVilageFcst", nx, ny, sbases, 2000)
+        ub, uidx, ukeys = None, 0, set()
         try:  # 가까운 6시간은 초단기예보로 덮어쓰기 (더 정확). 적설은 초단기에 없어 단기값 유지
-            ultra = _fetch("getUltraSrtFcst", nx, ny, u_date, u_time, 100)
+            ultra, ub, uidx = fetch_first("getUltraSrtFcst", nx, ny, ubases, 100)
             for k, (v, t, r, _) in ultra.items():
                 merged[k] = (v, t, r, merged[k][3] if k in merged else "")
-        except Exception:
-            pass
+                ukeys.add(k[0] + k[1][:2])  # 초단기가 적용된 시각 (YYYYMMDDHH)
+        except Exception as e:
+            print(f"  ({name}: 초단기예보 실패 - 단기예보만 사용: {e})")
         per = {}
         for (d, t), (v, tmp, rain, snow) in merged.items():
             dt = datetime.strptime(d + t, "%Y%m%d%H%M")
             if start <= dt <= limit:
                 per[dt.strftime("%Y%m%d%H")] = (v, to_temp(tmp), rain, snow)
+        return {"nx": nx, "ny": ny, "per": per, "sb": sb, "sidx": sidx, "ub": ub, "uidx": uidx, "ukeys": ukeys}
+
+    results, pending = {}, list(PLACES)
+    for rnd in range(3):  # 실패한 지점은 잠시 뒤 최대 2번 더 시도
+        failed = []
+        for name in pending:
+            try:
+                results[name] = load(name)
+            except Exception as e:
+                print(f"{name}: 조회 실패 ({e})")
+                failed.append(name)
+            time.sleep(0.5)
+        pending = failed
+        if not pending:
+            break
+        if rnd < 2:
+            print(f"-> {len(pending)}곳 실패, 잠시 뒤 다시 시도: {', '.join(pending)}")
+            time.sleep(10)
+
+    data = {}
+    for name in PLACES:
+        if name not in results:
+            data[name] = {}
+            continue
+        nx, ny, per = results[name]["nx"], results[name]["ny"], results[name]["per"]
         data[name] = per
         wet = [f"{hour_label(datetime.strptime(k, '%Y%m%d%H'))} {PTY_NAME[v]}({tp}°"
                + (f", 강수 {r}" if r else "") + (f", 적설 {sn}" if sn else "") + ")"
@@ -452,6 +568,30 @@ def main():
     for k in keys:
         d = datetime.strptime(k, "%Y%m%d%H")
         td.append([f"{d:%m/%d}({WEEK[d.weekday()]})", f"{d:%H}시"])
+    ok = [results[n] for n in PLACES if n in results]
+    ultra_union = set().union(*[r["ukeys"] for r in ok]) if ok else set()
+    ultra_flags = [k in ultra_union for k in keys]
+    ukeys_in = [k for k in keys if k in ultra_union]
+
+    def top(field):
+        vals = [r[field] for r in ok if r[field] is not None]
+        return max(set(vals), key=vals.count) if vals else None
+
+    def fmt_base(b):
+        return f"{datetime.strptime(b[0] + b[1], '%Y%m%d%H%M'):%m/%d %H:%M}" if b else ""
+
+    meta = {
+        "short": fmt_base(top("sb")),
+        "ultra": fmt_base(top("ub")),
+        "ultra_range": (hour_label(datetime.strptime(ukeys_in[0], "%Y%m%d%H")) + " ~ "
+                        + hour_label(datetime.strptime(ukeys_in[-1], "%Y%m%d%H"))) if ukeys_in else "",
+        "short_old": any(r["sidx"] > 0 for r in ok),
+        "ultra_old": any(r["ub"] is not None and r["uidx"] > 0 for r in ok),
+        "ultra_fail": [n for n in PLACES if n in results and results[n]["ub"] is None],
+        "fail": [n for n in PLACES if n not in results],
+    }
+    print(f"\n단기예보 발표 {meta['short']} / 초단기예보 발표 {meta['ultra'] or '없음'} ({meta['ultra_range']})"
+          f" / 초단기 대체 {meta['ultra_fail']} / 조회 실패 {meta['fail']}")
     places_js = [{"name": n, "lat": la, "lon": lo,
                   "codes": [data[n].get(k, ("?", None, "", ""))[0] for k in keys],
                   "temps": [data[n].get(k, ("?", None, "", ""))[1] for k in keys],
@@ -459,15 +599,19 @@ def main():
                   "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys]}
                  for n, (la, lo) in PLACES.items()]
 
-    m = folium.Map(
-        location=[36.0, 127.55], zoom_start=9,
+    m = folium.Map(location=[36.0, 127.55], zoom_start=9, tiles=None, zoom_control=False)
+    folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", zoom_control=False,
-    )
-    m.get_root().html.add_child(folium.Element(UI.replace("__UPDATED__", f"예보 갱신 {now:%m/%d %H:%M} 기준")))
+        attr="Esri", name="Esri", no_wrap=True, max_zoom=17,
+    ).add_to(m)
+    m.get_root().header.add_child(folium.Element(
+        '<title>기상정보</title>'))
+    m.get_root().html.add_child(folium.Element(UI.replace("__UPDATED__", f"ⓘ 수집 {now:%m/%d %H:%M}")))
     js = (JS.replace("__PLACES__", json.dumps(places_js, ensure_ascii=False))
             .replace("__TIMES__", json.dumps(times, ensure_ascii=False))
             .replace("__KEYS__", json.dumps(keys))
+            .replace("__ULTRA__", json.dumps(ultra_flags))
+            .replace("__META__", json.dumps(meta, ensure_ascii=False))
             .replace("__TD__", json.dumps(td, ensure_ascii=False))
             .replace("__NAMES__", json.dumps(PTY_NAME, ensure_ascii=False))
             .replace("__COLORS__", json.dumps(PTY_COLOR))
