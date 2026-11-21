@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.d3.outputs.page_url || steps.d2.outputs.page_url || steps.d1.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
 
@@ -43,5 +43,29 @@ jobs:
         with:
           path: site
 
-      - id: deployment
+      # 배포는 가끔 "올린 파일을 못 찾음" 오류로 한 번 실패하는 일이 있어서, 실패하면 30초 뒤 최대 2번 더 시도
+      - id: d1
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: 30초 대기 (재시도 1)
+        if: steps.d1.outcome == 'failure'
+        run: sleep 30
+
+      - id: d2
+        if: steps.d1.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: 30초 대기 (재시도 2)
+        if: steps.d1.outcome == 'failure' && steps.d2.outcome == 'failure'
+        run: sleep 30
+
+      - id: d3
+        if: steps.d1.outcome == 'failure' && steps.d2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: 3번 모두 실패하면 이 실행을 실패로 표시
+        if: steps.d1.outcome == 'failure' && steps.d2.outcome == 'failure' && steps.d3.outcome == 'failure'
+        run: exit 1
