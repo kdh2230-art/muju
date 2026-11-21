@@ -304,10 +304,11 @@ html,body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Ma
 #tmp{font-size:12px;color:#6b7280;margin-top:6px}
 #head .row{display:flex;gap:8px;align-items:center;margin-top:12px}
 #head .row button{border:0;background:#111827;color:#fff;border-radius:10px;width:42px;height:38px;font-size:15px;cursor:pointer}
-#rng{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:14px;border-radius:7px;background:#e5e7eb;outline:none;margin:0 4px}
-#rng::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280,0 1px 4px rgba(0,0,0,.4)}
-#rng::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280}
-#rng::-moz-range-track{background:transparent}
+#rng{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:14px;margin:4px 0;padding:0;border-radius:7px;background:#e5e7eb;outline:none}
+#rng::-webkit-slider-runnable-track{height:14px;background:transparent}
+#rng::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;box-sizing:border-box;width:22px;height:22px;margin-top:-4px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280,0 1px 4px rgba(0,0,0,.4)}
+#rng::-moz-range-thumb{box-sizing:border-box;width:22px;height:22px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280}
+#rng::-moz-range-track{background:transparent;height:14px}
 #legend{font-size:11px;color:#6b7280;margin-top:10px}
 #panel{position:fixed;top:12px;right:12px;z-index:9999;display:flex;flex-direction:column;
   max-height:calc(100vh - 24px);overflow:hidden}
@@ -326,7 +327,7 @@ html,body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Ma
 #panel tr.r:hover td.t{background:#f3f4f6}
 #panel tr.sel td.t{background:#111827;color:#fff}
 #panel tr.sel td.c{box-shadow:inset 0 0 0 2px #111827}
-.lbl{background:#fff;border:0;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;
+.lbl{background:#fff;border:0;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600;
   color:#111827;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .leaflet-tooltip-left:before,.leaflet-tooltip-right:before{display:none}
 path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
@@ -488,7 +489,7 @@ window.addEventListener('load', function() {
       c.style.background = (code === '0') ? '#f3f4f6' : COLORS[code];
       c.style.color = (code === '0') ? '#6b7280' : '#fff';
     });
-    tr.onclick = function() { show(i); };
+    tr.onclick = function() { obsMode = false; show(i); };
     rows.push(tr);
   });
   document.getElementById('scroll').appendChild(tbl);
@@ -510,7 +511,7 @@ window.addEventListener('load', function() {
       var from = i === 0 ? '0%' : pos(a), to = i === n - 1 ? '100%' : pos(b);
       stops.push(BC[best] + ' ' + from + ' ' + to);
     }
-    rng.style.background = 'linear-gradient(to right,' + stops.join(',') + ')';
+    rng.style.backgroundImage = 'linear-gradient(to right,' + stops.join(',') + ')';
   })();
   var grab = document.getElementById('grab');
   grab.onclick = function() {
@@ -520,10 +521,23 @@ window.addEventListener('load', function() {
   };
 
   // 예보 발표 시각 / 초단기 구간 / 대체 여부 안내
+  // 기상청 발표 일정: 단기예보 3시간마다(02,05,...,23시 정각), 초단기예보 매시 30분. 다음 발표 시각 계산(한국시간)
+  function z2(n) { return ('0' + n).slice(-2); }
+  var kn = new Date(Date.now() + 9 * 3600 * 1000), nowMin = kn.getUTCHours() * 60 + kn.getUTCMinutes();
+  function nextOf(mins) {  // 오늘 남은 발표가 없으면 내일 첫 발표
+    for (var q = 0; q < mins.length; q++) if (mins[q] > nowMin) return {t: z2(Math.floor(mins[q] / 60)) + ':' + z2(mins[q] % 60), tom: false};
+    return {t: z2(Math.floor(mins[0] / 60)) + ':' + z2(mins[0] % 60), tom: true};
+  }
+  var SH = [2, 5, 8, 11, 14, 17, 20, 23].map(function(h) { return h * 60; });
+  var UL = []; for (var hh = 0; hh < 24; hh++) UL.push(hh * 60 + 30);
+  var ns = nextOf(SH), nu = nextOf(UL);
   var mt = '';
-  if (META.ultra) mt += '<div><span class="chip u" style="margin-left:0">초단기</span> <b>' + META.ultra + '</b> 발표 · ' + META.ultra_range + '</div>';
-  if (META.short) mt += '<div><span class="chip s" style="margin-left:0">단기</span> <b>' + META.short + '</b> 발표</div>';
-  if (META.obs) mt += '<div><span class="chip o" style="margin-left:0">관측</span> <b>' + META.obs + '</b> 기준 (초단기실황)</div>';
+  mt += '<div><span class="chip u" style="margin-left:0">초단기</span> ' + (META.ultra ? '<b>' + META.ultra + '</b> 발표' + (META.ultra_range ? ' · ' + META.ultra_range : '') : '') +
+        '<br>매시 30분 발표 · 다음 <b>' + (nu.tom ? '내일 ' : '') + nu.t + '</b></div>';
+  mt += '<div><span class="chip s" style="margin-left:0">단기</span> ' + (META.short ? '<b>' + META.short + '</b> 발표' : '') +
+        '<br>3시간마다(02·05·08·11·14·17·20·23시) 발표 · 다음 <b>' + (ns.tom ? '내일 ' : '') + ns.t + '</b></div>';
+  if (META.obs) mt += '<div><span class="chip o" style="margin-left:0">관측</span> <b>' + META.obs + '</b> 기준 (초단기실황, 매시 정각)</div>';
+  mt += '<div style="color:#6b7280">※ 발표 후 이 화면에 반영되기까지 20~30분쯤 걸릴 수 있어요</div>';
   document.getElementById('meta').innerHTML = mt;
   (function() {
     var box = document.getElementById('obs');
@@ -561,6 +575,7 @@ window.addEventListener('load', function() {
   var mobile0 = window.innerWidth <= 700;
   if (mobile0) { panel.classList.add('min'); grab.textContent = '▴ 시간별 표 보기'; }
   var cur = 0;
+  var obsMode = true;  // 처음 화면은 관측값, 슬라이더/표를 건드리면 예보값
   function show(i) {
     i = Math.max(0, Math.min(TIMES.length - 1, i)); cur = i; rng.value = i;
     document.getElementById('wt').textContent = TIMES[i];
@@ -579,15 +594,12 @@ window.addEventListener('load', function() {
       else if (code === '1' || code === '4' || code === '5') g.rain.push(lab);
       else if (code === '?') g.unk++;
       if (tp !== null && tp !== undefined) temps.push(tp);
-      mk[j].setStyle({fillColor: COLORS[code]});
-      var state = ICON[code] ? NAMES[code] + ' ' : '';
-      var am = ICON[code] ? amt(p, i) : '';
-      var extra = '';
-      if (i === OBSIDX && p.obs) {
-        var same = kind(p.obs.code) === kind(code) || code === '?';
-        extra = same ? ' · 관측 일치' : ' · <span style="color:#dc2626">⚠ 관측 ' + (p.obs.code === '0' ? '없음' : NAMES[p.obs.code]) + '</span>';
-      }
-      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + state + fmt(tp) + (am ? ' · ' + am : '') + extra);
+      // 처음 열었을 때는 마커에 관측(초단기실황) 값, 시간을 움직이면 그 시각의 예보 값
+      var useObs = obsMode && p.obs;
+      var mc = useObs ? p.obs.code : code, mt2 = useObs ? p.obs.temp : tp;
+      var ma = useObs ? (p.obs.rain || '') : amt(p, i);
+      mk[j].setStyle({fillColor: COLORS[mc]});
+      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + (ICON[mc] ? NAMES[mc] + ' ' : '') + fmt(mt2) + (ICON[mc] && ma ? ' · ' + ma : ''));
     });
     var lines = [];
     if (g.snow.length) lines.push('❄ 눈 · ' + g.snow.join(', '));
@@ -599,9 +611,9 @@ window.addEventListener('load', function() {
     var tmp = document.getElementById('tmp');
     tmp.textContent = temps.length ? ('지점 기온 ' + fmt(Math.min.apply(null, temps)) + ' ~ ' + fmt(Math.max.apply(null, temps))) : '';
   }
-  rng.oninput = function() { show(parseInt(rng.value)); };
-  document.getElementById('prev').onclick = function() { show(cur - 1); };
-  document.getElementById('next').onclick = function() { show(cur + 1); };
+  rng.oninput = function() { obsMode = false; show(parseInt(rng.value)); };
+  document.getElementById('prev').onclick = function() { obsMode = false; show(cur - 1); };
+  document.getElementById('next').onclick = function() { obsMode = false; show(cur + 1); };
 
   // 열어 본 '지금' 시각(한국시간)에 맞는 줄을 처음에 선택
   function z(n) { return ('0' + n).slice(-2); }
