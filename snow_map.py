@@ -304,7 +304,10 @@ html,body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Ma
 #tmp{font-size:12px;color:#6b7280;margin-top:6px}
 #head .row{display:flex;gap:8px;align-items:center;margin-top:12px}
 #head .row button{border:0;background:#111827;color:#fff;border-radius:10px;width:42px;height:38px;font-size:15px;cursor:pointer}
-#rng{flex:1;accent-color:#111827;min-width:0}
+#rng{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:14px;border-radius:7px;background:#e5e7eb;outline:none;margin:0 4px}
+#rng::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280,0 1px 4px rgba(0,0,0,.4)}
+#rng::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#111827;border:3px solid #fff;box-shadow:0 0 0 1px #6b7280}
+#rng::-moz-range-track{background:transparent}
 #legend{font-size:11px;color:#6b7280;margin-top:10px}
 #panel{position:fixed;top:12px;right:12px;z-index:9999;display:flex;flex-direction:column;
   max-height:calc(100vh - 24px);overflow:hidden}
@@ -493,6 +496,22 @@ window.addEventListener('load', function() {
   var panel = document.getElementById('panel'), head = document.getElementById('head');
   var rng = document.getElementById('rng'), sum = document.getElementById('sum');
   rng.min = 0; rng.max = TIMES.length - 1; rng.step = 1;
+  // 게이지바: 시각별로 어느 지점이든 눈/비 예보가 있으면 그 색으로 칠함 (눈 > 비/눈 > 비 순으로 우선)
+  (function() {
+    var n = TIMES.length, T = 22, stops = [], BC = {snow: '#2563eb', mix: '#7c3aed', rain: '#059669', none: '#e5e7eb'};
+    function pos(f) { return 'calc(' + (T / 2) + 'px + (100% - ' + T + 'px) * ' + f.toFixed(4) + ')'; }
+    for (var i = 0; i < n; i++) {
+      var best = 'none';
+      PLACES.forEach(function(p) {
+        var k = kind(p.codes[i]);
+        if (k === 'snow' || (k === 'mix' && best !== 'snow') || (k === 'rain' && best === 'none')) best = k;
+      });
+      var a = n > 1 ? Math.max(0, (i - 0.5) / (n - 1)) : 0, b = n > 1 ? Math.min(1, (i + 0.5) / (n - 1)) : 1;
+      var from = i === 0 ? '0%' : pos(a), to = i === n - 1 ? '100%' : pos(b);
+      stops.push(BC[best] + ' ' + from + ' ' + to);
+    }
+    rng.style.background = 'linear-gradient(to right,' + stops.join(',') + ')';
+  })();
   var grab = document.getElementById('grab');
   grab.onclick = function() {
     var min = panel.classList.toggle('min');
