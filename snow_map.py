@@ -22,17 +22,61 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 IS_CI = bool(os.environ.get("GITHUB_ACTIONS"))
 HOURS_AHEAD = 72  # 앞으로 몇 시간까지 볼지 (단기예보는 최대 5일=120)
 
-# 고속도로 본선상의 IC/JC 위치 (위도, 경도). IC는 요금소, 무주읍은 무주군청 기준.
+# 고속도로 본선상의 IC/JC 위치 (위도, 경도). IC는 요금소(영업소) 기준. 무주IC = 한국도로공사 무주영업소.
 # 위치가 어긋나 보이면 이 숫자만 고치면 됩니다. (구글맵에서 지점 우클릭 -> 첫 줄 숫자 클릭하면 복사됨)
 PLACES = {
     "산내JC": (36.2816, 127.4509),
     "추부IC": (36.1963, 127.4809),
     "금산IC": (36.1054, 127.5252),
-    "무주읍": (36.0071, 127.6608),
+    "무주IC": (35.9746, 127.6530),
     "덕유산IC": (35.8429, 127.6489),
     "장수JC": (35.7314, 127.6064),
     "서상IC": (35.6665, 127.6797),
 }
+
+# 통영대전선 서상IC -> 산내JC 노선 (위도, 경도). 지도 캡처에 그린 자주색 선에서 추출한 도로 모양(오차 약 100~200m).
+# 지도에 회색 선으로 표시되고, 앞으로 구간별 눈·비 판단에 사용합니다.
+ROUTE = [
+    (35.66756, 127.66880),
+    (35.69066, 127.64966),
+    (35.70294, 127.62306),
+    (35.72528, 127.60287),
+    (35.75340, 127.59455),
+    (35.76304, 127.59666),
+    (35.77124, 127.60280),
+    (35.79437, 127.63283),
+    (35.80448, 127.64015),
+    (35.82808, 127.64339),
+    (35.84205, 127.64860),
+    (35.87045, 127.64867),
+    (35.88200, 127.65659),
+    (35.91328, 127.66642),
+    (35.93925, 127.66107),
+    (35.96233, 127.66167),
+    (35.96703, 127.65896),
+    (35.97905, 127.64504),
+    (35.99240, 127.61059),
+    (35.99635, 127.59336),
+    (36.00126, 127.58590),
+    (36.01231, 127.57950),
+    (36.03345, 127.57270),
+    (36.04402, 127.56624),
+    (36.05698, 127.55172),
+    (36.09779, 127.52182),
+    (36.11075, 127.50908),
+    (36.12130, 127.50605),
+    (36.14625, 127.50638),
+    (36.15483, 127.50017),
+    (36.16309, 127.48638),
+    (36.16879, 127.48321),
+    (36.18940, 127.48764),
+    (36.21337, 127.48704),
+    (36.23637, 127.47820),
+    (36.26607, 127.47127),
+    (36.27155, 127.46685),
+    (36.27846, 127.45279),
+    (36.28139, 127.45200),
+]
 
 LABEL_DIR = {"산내JC": "left", "추부IC": "left", "장수JC": "left"}  # 나머지는 오른쪽
 
@@ -170,6 +214,54 @@ def _fetch(endpoint, nx, ny, base_date, base_time, rows):
     raise last
 
 
+def obs_bases(now):
+    """초단기실황 발표 후보: [가장 최근 정시, 직전 정시] (매 정시 생성, 약 10분 뒤부터 조회 가능)"""
+    t = now - timedelta(minutes=10)
+    p = t - timedelta(hours=1)
+    return [(t.strftime("%Y%m%d"), f"{t.hour:02d}00"), (p.strftime("%Y%m%d"), f"{p.hour:02d}00")]
+
+
+def _num(v):
+    try:
+        x = float(v)
+        return None if x < -90 else x  # -99 등은 결측
+    except Exception:
+        return None
+
+
+def _fetch_obs(nx, ny, base_date, base_time):
+    """초단기실황: 격자별 대표 AWS 관측값 {PTY, 기온, 1시간 강수량}"""
+    url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
+    params = {"serviceKey": SERVICE_KEY, "pageNo": 1, "numOfRows": 20, "dataType": "JSON",
+              "base_date": base_date, "base_time": base_time, "nx": nx, "ny": ny}
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, timeout=25)
+            r.raise_for_status()
+            try:
+                j = r.json()
+            except Exception:
+                raise RuntimeError("JSON이 아닌 응답: " + r.text[:150].replace("\n", " "))
+            head = j["response"]["header"]
+            if head.get("resultCode") != "00":
+                if head.get("resultCode") == "03":
+                    raise NoData("03 NO_DATA")
+                raise RuntimeError(f'{head.get("resultCode")} {head.get("resultMsg")}')
+            vals = {i["category"]: i["obsrValue"] for i in j["response"]["body"]["items"]["item"]}
+            if "PTY" not in vals:
+                raise RuntimeError("실황에 PTY 없음")
+            t, rn = _num(vals.get("T1H")), _num(vals.get("RN1"))
+            return {"code": str(vals["PTY"]), "temp": None if t is None else round(t, 1),
+                    "rain": f"{rn:g}mm" if rn else ""}
+        except NoData:
+            raise
+        except Exception as e:
+            last = e
+            time.sleep(2 * (attempt + 1))
+    raise last
+
+
 def clean_amt(v):
     """'1.0mm'->'1mm', '1mm 미만'->'<1mm', '50.0mm 이상'->'50mm+', '강수없음'->''"""
     if v is None:
@@ -245,6 +337,14 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   vertical-align:middle;margin-left:8px}
 .chip.u{background:#dbeafe;color:#1e40af}
 .chip.s{background:#e5e7eb;color:#374151}
+.chip.o{background:#fef3c7;color:#92400e}
+#obs{margin-top:8px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:7px 10px;
+  font-size:12px;line-height:1.5;color:#78350f}
+#obs b{color:#92400e}
+#obs .diff{display:block;margin-top:3px;font-weight:800;color:#b45309}
+#panel tr.obsrow td.t{background:#fef3c7;color:#92400e;border-radius:8px 0 0 8px;font-size:11px}
+#panel tr.obsrow td.c{border:2px dashed #f59e0b;box-sizing:border-box}
+#panel tr.obsrow td.c.diff{border:2px solid #dc2626}
 #upd{cursor:pointer}
 #warn{font-size:12px;font-weight:700;color:#b45309;margin-top:6px;line-height:1.4}
 #meta{font-size:11px;color:#4b5563;margin-top:10px;line-height:1.7;border-top:1px solid #e5e7eb;padding-top:8px}
@@ -260,11 +360,12 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   #when{font-size:19px;margin:4px 0 6px}
   #sum{font-size:13px;padding:7px 9px}
   #tmp{margin-top:4px}
+  #obs{margin-top:6px;padding:5px 8px;font-size:11px}
   #head .row{margin-top:8px}
   #head .row button{height:34px}
   #legend{display:none;margin-top:6px}
-  #meta{display:none;margin-top:6px;padding-top:5px;font-size:10.5px}
-  #head.info #meta,#head.info #legend{display:block}
+  #meta{margin-top:6px;padding-top:5px;font-size:10.5px;line-height:1.5}
+  #head.info #legend{display:block}
   .leaflet-control-zoom{display:none}
   #panel{top:auto;left:0;right:0;bottom:0;max-height:36vh;border-radius:16px 16px 0 0}
   #grab{display:block;text-align:center;font-size:12px;font-weight:700;color:#6b7280;padding:9px 0 7px;cursor:pointer}
@@ -279,10 +380,11 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   <div id="when"><span id="wt"></span><span id="kind" class="chip"></span></div>
   <div id="sum"></div>
   <div id="tmp"></div>
+  <div id="obs"></div>
   <div id="warn"></div>
   <div class="row"><button id="prev">◀</button><input type="range" id="rng"><button id="next">▶</button></div>
   <div id="meta"></div>
-  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음 &nbsp;? 조회 실패<br>큰 숫자는 기온(℃), 작은 글씨는 시간당 강수량(mm)·적설(cm)<br>시각 옆 <span style="color:#2563eb;font-weight:800">파란 띠</span>=초단기예보, <span style="color:#9ca3af;font-weight:800">회색 띠</span>=단기예보</div>
+  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음<br>큰 숫자는 기온(℃), 작은 글씨는 시간당 강수량(mm)·적설(cm)<br><span style="color:#92400e;font-weight:800">노란 점선 칸</span>=실제 관측 · 시각 옆 <span style="color:#2563eb;font-weight:800">파란 띠</span>=초단기예보, <span style="color:#9ca3af;font-weight:800">회색 띠</span>=단기예보</div>
 </div>
 <div id="edit" class="card">
   <h3>📍 위치 수정 모드</h3>
@@ -302,6 +404,10 @@ window.addEventListener('load', function() {
   var MAP = __MAP__;
   var PLACES = __PLACES__, TIMES = __TIMES__, KEYS = __KEYS__, TD = __TD__;
   var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__, ULTRA = __ULTRA__, META = __META__;
+  var ROUTE = __ROUTE__;
+  function wet(c) { return c !== '0' && c !== '?' && c !== undefined && c !== null; }
+  function kind(c) { return (c === '3' || c === '7') ? 'snow' : (c === '2' || c === '6') ? 'mix' : wet(c) ? 'rain' : 'none'; }
+  var OBSIDX = KEYS.indexOf(META.obs_key);  // 관측 시각이 표에 있으면 예보와 비교
   var ICON = {'3':'❄','7':'❄','2':'🌨','6':'🌨','1':'💧','4':'💧','5':'💧'};
   function amt(p, i) {
     var a = [];
@@ -322,6 +428,10 @@ window.addEventListener('load', function() {
     var mz = MAP.getBoundsZoom(KB, true);
     if (isFinite(mz)) MAP.setMinZoom(mz);
   } catch (e) {}
+  if (ROUTE.length > 1 && location.hash !== '#edit') {  // 노선(도로 모양) 표시
+    L.polyline(ROUTE, {color: '#ffffff', weight: 8, opacity: 0.9}).addTo(MAP);
+    L.polyline(ROUTE, {color: '#4b5563', weight: 4, opacity: 0.95}).addTo(MAP);
+  }
   var mk = [], rows = [];
   PLACES.forEach(function(p) {
     var c = L.circleMarker([p.lat, p.lon], {radius: 8, color: '#fff', weight: 2.5, fillOpacity: 1}).addTo(MAP);
@@ -333,14 +443,35 @@ window.addEventListener('load', function() {
 
   var tbl = document.createElement('table');
   var h = '<tr><th>시각</th>';
-  PLACES.forEach(function(p) { h += '<th>' + p.name + (META.ultra_fail.indexOf(p.name) >= 0 ? ' ⚠' : '') + '</th>'; });
+  PLACES.forEach(function(p) { h += '<th>' + p.name + '</th>'; });
   tbl.innerHTML = h + '</tr>';
+  var hasObs = PLACES.some(function(p) { return p.obs; });
+  if (hasObs) {
+    var orow = tbl.insertRow(); orow.className = 'obsrow';
+    var oc0 = orow.insertCell(); oc0.className = 't';
+    oc0.textContent = '관측 ' + (META.obs ? META.obs.slice(-5).slice(0, 2) + '시' : '');
+    PLACES.forEach(function(p, j) {
+      var c = orow.insertCell(); c.className = 'c', o = p.obs;
+      if (!o) { c.textContent = '?'; c.style.background = '#333'; c.style.color = '#fff'; return; }
+      var tp = fmt(o.temp);
+      c.appendChild(document.createTextNode((ICON[o.code] ? ICON[o.code] + ' ' : '') + (tp || '·')));
+      if (o.rain) { var sp = document.createElement('span'); sp.className = 'a'; sp.textContent = o.rain; c.appendChild(sp); }
+      c.style.background = (o.code === '0') ? '#f3f4f6' : COLORS[o.code];
+      c.style.color = (o.code === '0') ? '#6b7280' : '#fff';
+      if (OBSIDX >= 0 && kind(p.codes[OBSIDX]) !== kind(o.code) && p.codes[OBSIDX] !== '?') c.classList.add('diff');
+    });
+  }
   var lastDate = '';
   TD.forEach(function(t, i) {
     if (t[0] !== lastDate) {
       lastDate = t[0];
       var dc = tbl.insertRow().insertCell();
       dc.colSpan = PLACES.length + 1; dc.className = 'd'; dc.textContent = t[0];
+    }
+    if (ULTRA[i] && (i === 0 || !ULTRA[i - 1])) {  // 파란 띠가 시작되는 곳에만 '초단기예보' 표시
+      var sc = tbl.insertRow().insertCell();
+      sc.colSpan = PLACES.length + 1; sc.className = 'sep';
+      sc.textContent = '초단기예보';
     }
     var tr = tbl.insertRow(); tr.className = 'r';
     var c0 = tr.insertCell(); c0.className = 't ' + (ULTRA[i] ? 'u' : 's'); c0.textContent = t[1];
@@ -356,11 +487,6 @@ window.addEventListener('load', function() {
     });
     tr.onclick = function() { show(i); };
     rows.push(tr);
-    if (ULTRA[i] && i + 1 < TD.length && !ULTRA[i + 1]) {  // 초단기 구간이 끝나는 지점 표시
-      var sc = tbl.insertRow().insertCell();
-      sc.colSpan = PLACES.length + 1; sc.className = 'sep';
-      sc.textContent = '▲ 여기까지 초단기예보 · ▼ 아래는 단기예보';
-    }
   });
   document.getElementById('scroll').appendChild(tbl);
 
@@ -375,16 +501,42 @@ window.addEventListener('load', function() {
   };
 
   // 예보 발표 시각 / 초단기 구간 / 대체 여부 안내
-  var mt = '<div><span class="chip u" style="margin-left:0">초단기</span> ' +
-           (META.ultra ? '<b>' + META.ultra + '</b> 발표 · ' + META.ultra_range : '<b>조회 실패</b> (단기예보로 대체)') + '</div>' +
-           '<div><span class="chip s" style="margin-left:0">단기</span> <b>' + META.short + '</b> 발표 · 초단기 이후 구간과 적설(cm)</div>';
-  if (META.ultra_old) mt += '<div>※ 최신 초단기 발표가 아직 없어 직전 발표를 사용 중</div>';
-  if (META.short_old) mt += '<div>※ 최신 단기 발표가 아직 없어 직전 발표를 사용 중</div>';
+  var mt = '';
+  if (META.ultra) mt += '<div><span class="chip u" style="margin-left:0">초단기</span> <b>' + META.ultra + '</b> 발표 · ' + META.ultra_range + '</div>';
+  if (META.short) mt += '<div><span class="chip s" style="margin-left:0">단기</span> <b>' + META.short + '</b> 발표</div>';
+  if (META.obs) mt += '<div><span class="chip o" style="margin-left:0">관측</span> <b>' + META.obs + '</b> 기준 (초단기실황)</div>';
   document.getElementById('meta').innerHTML = mt;
-  var wn = [];
-  if (META.fail.length) wn.push('❌ 조회 실패(?): ' + META.fail.join(', '));
-  if (META.ultra_fail.length) wn.push('⚠ 초단기 조회 실패 → 단기예보로 대체: ' + META.ultra_fail.join(', '));
-  document.getElementById('warn').innerHTML = wn.join('<br>');
+  (function() {
+    var box = document.getElementById('obs');
+    var ps = PLACES.filter(function(p) { return p.obs; });
+    if (!ps.length) {
+      box.style.display = 'none';
+      return;
+    }
+    var g = {snow: [], mix: [], rain: []}, tt = [], diffs = [];
+    ps.forEach(function(p) {
+      var o = p.obs, k = kind(o.code);
+      var lab = p.name + (o.rain ? '(' + o.rain + ')' : '');
+      if (k !== 'none') g[k].push(lab);
+      if (o.temp !== null && o.temp !== undefined) tt.push(o.temp);
+      if (OBSIDX >= 0) {
+        var fc = p.codes[OBSIDX];
+        if (fc !== '?' && kind(fc) !== k) {
+          var nm = function(c) { return c === '0' ? '없음' : NAMES[c]; };
+          diffs.push(p.name + ' 예보 ' + nm(fc) + ' → 관측 ' + nm(o.code));
+        }
+      }
+    });
+    var lines = [];
+    if (g.snow.length) lines.push('❄ 눈 · ' + g.snow.join(', '));
+    if (g.mix.length) lines.push('🌨 비/눈 · ' + g.mix.join(', '));
+    if (g.rain.length) lines.push('💧 비 · ' + g.rain.join(', '));
+    if (!lines.length) lines.push('✅ 비·눈 관측 없음');
+    var tr = tt.length ? ' · 기온 ' + fmt(Math.min.apply(null, tt)) + ' ~ ' + fmt(Math.max.apply(null, tt)) : '';
+    var html = '<span class="chip o" style="margin-left:0">관측</span> <b>' + (META.obs ? META.obs.slice(-5) : '') + '</b> 기준' + tr + '<br>' + lines.join('<br>');
+    if (diffs.length) html += '<span class="diff">⚠ 예보와 다름: ' + diffs.join(' / ') + '</span>';
+    box.innerHTML = html;
+  })();
   document.getElementById('upd').onclick = function() { head.classList.toggle('info'); };
 
   var mobile0 = window.innerWidth <= 700;
@@ -411,7 +563,12 @@ window.addEventListener('load', function() {
       mk[j].setStyle({fillColor: COLORS[code]});
       var state = ICON[code] ? NAMES[code] + ' ' : '';
       var am = ICON[code] ? amt(p, i) : '';
-      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + state + fmt(tp) + (am ? ' · ' + am : ''));
+      var extra = '';
+      if (i === OBSIDX && p.obs) {
+        var same = kind(p.obs.code) === kind(code) || code === '?';
+        extra = same ? ' · 관측 일치' : ' · <span style="color:#dc2626">⚠ 관측 ' + (p.obs.code === '0' ? '없음' : NAMES[p.obs.code]) + '</span>';
+      }
+      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + state + fmt(tp) + (am ? ' · ' + am : '') + extra);
     });
     var lines = [];
     if (g.snow.length) lines.push('❄ 눈 · ' + g.snow.join(', '));
@@ -441,7 +598,7 @@ window.addEventListener('load', function() {
   // 핀 7개가 카드/표에 가려지지 않게 화면 맞춤
   try {
     var mobile = window.innerWidth <= 700;
-    var b = L.latLngBounds(PLACES.map(function(p) { return [p.lat, p.lon]; }));
+    var b = L.latLngBounds(PLACES.map(function(p) { return [p.lat, p.lon]; }).concat(ROUTE));
     MAP.fitBounds(b, {
       paddingTopLeft: [mobile ? 16 : head.offsetWidth + 50, mobile ? head.offsetHeight + 18 : 50],
       paddingBottomRight: [(mobile ? 16 : panel.offsetWidth + 40) + (mobile ? 64 : 80),
@@ -495,7 +652,8 @@ def main():
     now = now_kst()
     start = now.replace(minute=0, second=0, microsecond=0)
     limit = now + timedelta(hours=HOURS_AHEAD)
-    sbases, ubases = short_bases(now), ultra_bases(now)
+    sbases, ubases, obases = short_bases(now), ultra_bases(now), obs_bases(now)
+    last_obs_err = None
     print(f"현재(한국시간) {now:%m/%d %H:%M} / 단기예보 후보 {sbases} / 초단기예보 후보 {ubases}\n")
     if not SERVICE_KEY:
         print("인증키가 없습니다. key.txt 에 키를 저장하거나 SERVICE_KEY 환경변수를 설정하세요.")
@@ -523,12 +681,22 @@ def main():
                 ukeys.add(k[0] + k[1][:2])  # 초단기가 적용된 시각 (YYYYMMDDHH)
         except Exception as e:
             print(f"  ({name}: 초단기예보 실패 - 단기예보만 사용: {e})")
+        ob, oidx, obs = None, 0, None
+        for idx, (d, t) in enumerate(obases):  # 관측: 최신 정시 -> 없으면 직전 정시
+            try:
+                obs, ob, oidx = _fetch_obs(nx, ny, d, t), (d, t), idx
+                break
+            except Exception as e:
+                last_obs_err = e
+        if obs is None:
+            print(f"  ({name}: 관측(초단기실황) 실패 - 관측 없이 표시: {last_obs_err})")
         per = {}
         for (d, t), (v, tmp, rain, snow) in merged.items():
             dt = datetime.strptime(d + t, "%Y%m%d%H%M")
             if start <= dt <= limit:
                 per[dt.strftime("%Y%m%d%H")] = (v, to_temp(tmp), rain, snow)
-        return {"nx": nx, "ny": ny, "per": per, "sb": sb, "sidx": sidx, "ub": ub, "uidx": uidx, "ukeys": ukeys}
+        return {"nx": nx, "ny": ny, "per": per, "sb": sb, "sidx": sidx, "ub": ub, "uidx": uidx, "ukeys": ukeys,
+                "obs": obs, "ob": ob, "oidx": oidx}
 
     results, pending = {}, list(PLACES)
     for rnd in range(3):  # 실패한 지점은 잠시 뒤 최대 2번 더 시도
@@ -577,26 +745,40 @@ def main():
         vals = [r[field] for r in ok if r[field] is not None]
         return max(set(vals), key=vals.count) if vals else None
 
+    def all_bases(field):
+        vals = sorted({r[field] for r in ok if r[field] is not None})
+        return " / ".join(fmt_base(b) for b in vals)
+
     def fmt_base(b):
         return f"{datetime.strptime(b[0] + b[1], '%Y%m%d%H%M'):%m/%d %H:%M}" if b else ""
 
     meta = {
-        "short": fmt_base(top("sb")),
-        "ultra": fmt_base(top("ub")),
+        "short": all_bases("sb"),
+        "ultra": all_bases("ub"),
         "ultra_range": (hour_label(datetime.strptime(ukeys_in[0], "%Y%m%d%H")) + " ~ "
                         + hour_label(datetime.strptime(ukeys_in[-1], "%Y%m%d%H"))) if ukeys_in else "",
         "short_old": any(r["sidx"] > 0 for r in ok),
         "ultra_old": any(r["ub"] is not None and r["uidx"] > 0 for r in ok),
         "ultra_fail": [n for n in PLACES if n in results and results[n]["ub"] is None],
         "fail": [n for n in PLACES if n not in results],
+        "obs": all_bases("ob"),
+        "obs_key": (lambda b: b[0] + b[1][:2] if b else "")(top("ob")),
+        "obs_old": any(r["ob"] is not None and r["oidx"] > 0 for r in ok),
+        "obs_fail": [n for n in PLACES if n in results and results[n]["obs"] is None],
     }
     print(f"\n단기예보 발표 {meta['short']} / 초단기예보 발표 {meta['ultra'] or '없음'} ({meta['ultra_range']})"
           f" / 초단기 대체 {meta['ultra_fail']} / 조회 실패 {meta['fail']}")
+    print(f"관측(초단기실황) 기준 {meta['obs'] or '없음'} / 관측 실패 {meta['obs_fail']}")
+    for n in PLACES:
+        o = results.get(n, {}).get("obs")
+        if o:
+            print(f"  관측 {n}: {PTY_NAME.get(o['code'], o['code'])} {o['temp']}°" + (f" 강수 {o['rain']}" if o["rain"] else ""))
     places_js = [{"name": n, "lat": la, "lon": lo,
                   "codes": [data[n].get(k, ("?", None, "", ""))[0] for k in keys],
                   "temps": [data[n].get(k, ("?", None, "", ""))[1] for k in keys],
                   "rain": [data[n].get(k, ("?", None, "", ""))[2] for k in keys],
-                  "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys]}
+                  "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys],
+                  "obs": results[n]["obs"] if n in results else None}
                  for n, (la, lo) in PLACES.items()]
 
     m = folium.Map(location=[36.0, 127.55], zoom_start=9, tiles=None, zoom_control=False)
@@ -616,6 +798,7 @@ def main():
             .replace("__NAMES__", json.dumps(PTY_NAME, ensure_ascii=False))
             .replace("__COLORS__", json.dumps(PTY_COLOR))
             .replace("__DIRS__", json.dumps(LABEL_DIR, ensure_ascii=False))
+            .replace("__ROUTE__", json.dumps(ROUTE))
             .replace("__MAP__", m.get_name()))
     m.get_root().html.add_child(folium.Element("<script>" + js + "</script>"))
 
