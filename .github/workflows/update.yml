@@ -2,12 +2,9 @@ name: update-snow-map
 
 on:
   schedule:
-    # 초단기예보(매시 30분 발표): 36분부터 5분 간격으로 확인 (아직 안 올라왔으면 직전 발표로 표시, 올라오면 바로 반영)
-    # 초단기실황(관측, 정시 10분 뒤부터 조회): 12, 17분
-    - cron: "12,17,36,41,46,51,56 * * * *"
-    # 단기예보(KST 02,05,08,11,14,17,20,23시 발표): 발표 15분, 25분 뒤에 시도
-    # GitHub 시각은 UTC라서 한국시간에서 9시간 뺀 값(17,20,23,02,05,08,11,14시)
-    - cron: "15,25 17,20,23,2,5,8,11,14 * * *"
+    # 5분마다 실행 (한 시간에 12번, 같은 간격). 초단기예보(매시 30분 발표)와 초단기실황(정시 10분 뒤)은 매번 새로 받고,
+    # 단기예보(3시간마다 발표)는 새 발표가 있을 때만 받고 나머지는 저장해 둔 값을 씀
+    - cron: "*/5 * * * *"
   workflow_dispatch:        # 수동 실행 버튼
 
 permissions:
@@ -32,6 +29,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # 저장해 둔 단기예보 불러오기 (없으면 처음부터 받아옴)
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: cache/short.json
+          key: short-none
+          restore-keys: short-
+
       - name: 라이브러리 설치
         run: pip install requests folium
 
@@ -39,6 +44,13 @@ jobs:
         run: python snow_map.py
         env:
           SERVICE_KEY: ${{ secrets.SERVICE_KEY }}
+
+      # 단기예보를 새로 받아왔을 때만 저장 (캐시가 불필요하게 쌓이지 않게)
+      - uses: actions/cache/save@v4
+        if: hashFiles('cache/dirty') != ''
+        with:
+          path: cache/short.json
+          key: short-${{ github.run_id }}-${{ github.run_attempt }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
