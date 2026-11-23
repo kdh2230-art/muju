@@ -172,24 +172,60 @@ CACHE_FILE = os.path.join("cache", "short.json")
 SHORT_CACHE = {}
 
 
-def load_short_cache():
+def load_json(path):
     try:
-        with open(CACHE_FILE, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
 
 
-def save_short_cache(d):
-    """저장해 둔 단기예보. 새로 받아왔을 때만 쓰고, 워크플로가 이 표시를 보고 캐시를 갱신한다"""
+def load_short_cache():
+    return load_json(CACHE_FILE)
+
+
+ROUTE_CACHE_FILE = os.path.join("cache", "route.json")
+ROUTE_CACHE = {}
+
+
+def route_segments():
+    """노선을 0.3km 간격으로 쪼개 격자별 구간으로 묶는다 -> (격자 목록, [[격자번호, [[lat,lon],...]], ...])"""
+    grids, segs = [], []
+    lines = ([ROUTE] if len(ROUTE) > 1 else []) + [b for b in BRANCHES if len(b) > 1]
+    for line in lines:
+        dense = []
+        for (a, b), (c, d) in zip(line, line[1:]):
+            n = max(1, int(math.hypot(c - a, (d - b) * 0.82) * 111 / 0.3))
+            dense += [(a + (c - a) * i / n, b + (d - b) * i / n) for i in range(n)]
+        dense.append(line[-1])
+        cur_g, cur_pts = None, []
+        for pt in dense:
+            g = latlon_to_grid(*pt)
+            if g not in grids:
+                grids.append(g)
+            gi = grids.index(g)
+            if gi != cur_g and cur_pts:
+                cur_pts.append([round(pt[0], 5), round(pt[1], 5)])  # 끊김 없이 이어지게 경계점 공유
+                segs.append([cur_g, cur_pts])
+                cur_pts = []
+            cur_g = gi
+            cur_pts.append([round(pt[0], 5), round(pt[1], 5)])
+        if cur_pts:
+            segs.append([cur_g, cur_pts])
+    return grids, segs
+
+
+def save_caches():
+    """저장해 둔 단기예보·노선 초단기예보. 워크플로가 cache/dirty 파일이 있을 때만 캐시를 갱신한다"""
     try:
         os.makedirs("cache", exist_ok=True)
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False)
+        for f, d in ((CACHE_FILE, SHORT_CACHE), (ROUTE_CACHE_FILE, ROUTE_CACHE)):
+            with open(f, "w", encoding="utf-8") as fh:
+                json.dump(d, fh, ensure_ascii=False)
         open(os.path.join("cache", "dirty"), "w").close()
     except Exception as e:
-        print("단기예보 저장 실패:", e)
+        print("캐시 저장 실패:", e)
 
 
 def short_bases(now):
@@ -469,7 +505,7 @@ window.addEventListener('load', function() {
   var MAP = __MAP__;
   var PLACES = __PLACES__, TIMES = __TIMES__, KEYS = __KEYS__, TD = __TD__;
   var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__, ULTRA = __ULTRA__, META = __META__;
-  var ROUTE = __ROUTE__, BRANCH = __BRANCH__;
+  var ROUTE = __ROUTE__, BRANCH = __BRANCH__, RSEG = __RSEG__, RGC = __RGC__;
   var WRN = __WRN__, ZONEGEO = __ZONEGEO__;
   function wet(c) { return c !== '0' && c !== '?' && c !== undefined && c !== null; }
   function kind(c) { return (c === '3' || c === '7') ? 'snow' : (c === '2' || c === '6') ? 'mix' : wet(c) ? 'rain' : 'none'; }
@@ -548,6 +584,17 @@ window.addEventListener('load', function() {
     BRANCH.forEach(function(b) { L.polyline(b, {color: '#ffffff', weight: 8, opacity: 0.9}).addTo(MAP); });
     L.polyline(ROUTE, {color: '#4b5563', weight: 4, opacity: 0.95}).addTo(MAP);
     BRANCH.forEach(function(b) { L.polyline(b, {color: '#4b5563', weight: 4, opacity: 0.95}).addTo(MAP); });
+  }
+  // 구간별 날씨 색칠: 노선이 지나는 5km 격자마다 그 시각의 비/눈 색을 입힘 (비·눈이 없으면 회색 그대로)
+  var segLines = (location.hash !== '#edit') ? RSEG.map(function(sg) {
+    return L.polyline(sg[1], {color: '#4b5563', weight: 5, opacity: 0, lineCap: 'butt'}).addTo(MAP);
+  }) : [];
+  function paintRoute(i) {
+    segLines.forEach(function(ln, k) {
+      var code = RGC[RSEG[k][0]] ? RGC[RSEG[k][0]][i] : '?';
+      if (wet(code)) ln.setStyle({color: COLORS[code], opacity: 1});
+      else ln.setStyle({opacity: 0});
+    });
   }
   var mk = [], rows = [];
   PLACES.forEach(function(p) {
@@ -655,6 +702,7 @@ window.addEventListener('load', function() {
     kd.textContent = ULTRA[i] ? '초단기' : '단기';
     kd.className = 'chip ' + (ULTRA[i] ? 'u' : 's');
     rows.forEach(function(r, k) { r.classList.toggle('sel', k === i); });
+    paintRoute(i);
     if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: 'nearest'});
 
     var g = {snow: [], mix: [], rain: [], unk: 0}, temps = [];
@@ -1043,7 +1091,7 @@ def main():
             time.sleep(10)
 
     if FRESH:
-        save_short_cache(SHORT_CACHE)
+        save_caches()
     data = {}
     for name in PLACES:
         if name not in results:
@@ -1126,6 +1174,79 @@ def main():
                   "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys]}
                  for n, (la, lo) in PLACES.items()]
 
+    # ---- 노선 전체 날씨: 노선이 지나는 격자 중 IC/JC가 아닌 곳은 초단기예보(+실황)만 받아 구간을 색칠한다.
+    # 초단기예보·실황은 한 시간에 한 번만 바뀌므로 새 발표가 있을 때만 받고 나머지는 저장해 둔 값을 쓴다.
+    rseg, rgc = [], []
+    try:
+        rgrids, rseg = route_segments()
+        place_by_grid = {latlon_to_grid(*la_lo): n for n, la_lo in PLACES.items()}
+        ROUTE_CACHE.update(load_json(ROUTE_CACHE_FILE))
+        skip = {"u": False, "o": False}
+        route_fresh = False
+
+        def route_one(g):
+            nonlocal route_fresh
+            key = f"{g[0]},{g[1]}"
+            c = ROUTE_CACHE.get(key, {})
+            # 초단기예보
+            if c.get("ub") != list(ubases[0]):
+                got = None
+                if not skip["u"]:
+                    try:
+                        got = (_fetch("getUltraSrtFcst", g[0], g[1], ubases[0][0], ubases[0][1], 100), ubases[0])
+                    except NoData:
+                        skip["u"] = True
+                    except Exception as e:
+                        print(f"  (노선 격자 {key}: 초단기예보 실패 {e})")
+                if got is None and not c.get("ult"):
+                    try:
+                        got = (_fetch("getUltraSrtFcst", g[0], g[1], ubases[1][0], ubases[1][1], 100), ubases[1])
+                    except Exception:
+                        got = None
+                if got:
+                    c["ult"] = [[a, b, *v] for (a, b), v in got[0].items()]
+                    c["ub"] = list(got[1])
+                    route_fresh = True
+            # 실황(관측)
+            if c.get("ob") != list(obases[0]):
+                got = None
+                if not skip["o"]:
+                    try:
+                        got = (_fetch_obs(g[0], g[1], obases[0][0], obases[0][1]), obases[0])
+                    except Exception:
+                        skip["o"] = True
+                if got is None and not c.get("obs"):
+                    try:
+                        got = (_fetch_obs(g[0], g[1], obases[1][0], obases[1][1]), obases[1])
+                    except Exception:
+                        got = None
+                if got:
+                    c["obs"], c["ob"] = got[0], list(got[1])
+                    route_fresh = True
+            ROUTE_CACHE[key] = c
+            return c
+
+        for gi, g in enumerate(rgrids):
+            n = place_by_grid.get(g)
+            if n:  # IC/JC 격자는 이미 받은 값 그대로
+                rgc.append([data[n].get(k, ("?",))[0] for k in keys])
+                continue
+            c = route_one(g)
+            per = {r[0] + r[1][:2]: r[2:] for r in c.get("ult", [])}
+            if c.get("obs") and c.get("ob"):
+                ok_ = c["ob"][0] + c["ob"][1][:2]
+                ub_dt = datetime.strptime(c["ub"][0] + c["ub"][1], "%Y%m%d%H%M") if c.get("ub") else None
+                if ub_dt is None or ub_dt < datetime.strptime(c["ob"][0] + c["ob"][1], "%Y%m%d%H%M"):
+                    per[ok_] = [c["obs"]["code"]]
+            rgc.append([per.get(k, ["?"])[0] for k in keys])
+        if route_fresh:
+            FRESH.add("route")
+            save_caches()
+        print(f"노선 격자 {len(rgrids)}곳 (IC/JC 제외 {len(rgrids) - len(place_by_grid)}곳 추가 조회), 구간 {len(rseg)}개")
+    except Exception as e:
+        print("노선 날씨 처리 실패(노선은 회색으로 표시):", e)
+        rseg, rgc = [], []
+
     m = folium.Map(location=[36.0, 127.55], zoom_start=9, tiles=None, zoom_control=False)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
@@ -1147,6 +1268,8 @@ def main():
             .replace("__ZONEGEO__", json.dumps(ZONES_GEO, ensure_ascii=False))
             .replace("__BRANCH__", json.dumps(BRANCHES))
             .replace("__ROUTE__", json.dumps(ROUTE))
+            .replace("__RSEG__", json.dumps(rseg))
+            .replace("__RGC__", json.dumps(rgc))
             .replace("__MAP__", m.get_name()))
     m.get_root().html.add_child(folium.Element("<script>" + js + "</script>"))
 
