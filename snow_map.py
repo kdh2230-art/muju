@@ -400,7 +400,8 @@ html,body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Ma
 #scroll{overflow:auto}
 #panel table{border-collapse:separate;border-spacing:0;font-size:12px;width:100%}
 #panel th{position:sticky;top:0;background:#fff;z-index:2;padding:9px 2px;font-size:11px;color:#6b7280;
-  font-weight:700;border-bottom:1px solid #e5e7eb}
+  font-weight:700;border-bottom:1px solid #e5e7eb;text-align:center;white-space:nowrap}
+#panel th:first-child{text-align:left;padding-left:9px}
 #panel td{padding:0}
 #panel td.t{padding:7px 9px;font-weight:700;white-space:nowrap;color:#374151;border-radius:8px 0 0 8px}
 #panel td.c{text-align:center;padding:7px 2px;min-width:50px;font-weight:700;white-space:nowrap;
