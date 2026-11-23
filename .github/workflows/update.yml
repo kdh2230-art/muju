@@ -29,11 +29,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      # 저장해 둔 단기예보 불러오기 (없으면 처음부터 받아옴)
+      # 저장해 둔 단기예보·노선 예보 불러오기 (없으면 처음부터 받아옴)
       - id: cache
         uses: actions/cache/restore@v4
         with:
-          path: cache/short.json
+          path: |
+            cache/short.json
+            cache/route.json
           key: short-none
           restore-keys: short-
 
@@ -45,11 +47,13 @@ jobs:
         env:
           SERVICE_KEY: ${{ secrets.SERVICE_KEY }}
 
-      # 단기예보를 새로 받아왔을 때만 저장 (캐시가 불필요하게 쌓이지 않게)
+      # 단기예보·노선 초단기예보를 새로 받아왔을 때만 저장 (캐시가 불필요하게 쌓이지 않게)
       - uses: actions/cache/save@v4
         if: hashFiles('cache/dirty') != ''
         with:
-          path: cache/short.json
+          path: |
+            cache/short.json
+            cache/route.json
           key: short-${{ github.run_id }}-${{ github.run_attempt }}
 
       - uses: actions/upload-pages-artifact@v3
