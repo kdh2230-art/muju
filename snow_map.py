@@ -34,48 +34,60 @@ PLACES = {
     "서상IC": (35.6665, 127.6797),
 }
 
-# 통영대전선 서상IC -> 산내JC 노선 (위도, 경도). 지도 캡처에 그린 자주색 선에서 추출한 도로 모양(오차 약 100~200m).
-# 지도에 회색 선으로 표시되고, 앞으로 구간별 눈·비 판단에 사용합니다.
+# 통영대전선(고속국도 제35호선) 서상IC -> 산내JC 본선 (위도, 경도).
+# 모양은 OpenStreetMap(© OpenStreetMap contributors, ODbL)의 도로공사 노선을 단순화한 것(도로에서 약 100m 이내)을
+# 서상IC~산내JC 구간만 잘라 쓴 것입니다. 지도에 회색 선으로 표시됩니다.
 ROUTE = [
-    (35.66756, 127.66880),
-    (35.69066, 127.64966),
-    (35.70294, 127.62306),
-    (35.72528, 127.60287),
-    (35.75340, 127.59455),
-    (35.76304, 127.59666),
-    (35.77124, 127.60280),
-    (35.79437, 127.63283),
-    (35.80448, 127.64015),
-    (35.82808, 127.64339),
-    (35.84205, 127.64860),
-    (35.87045, 127.64867),
-    (35.88200, 127.65659),
-    (35.91328, 127.66642),
-    (35.93925, 127.66107),
-    (35.96233, 127.66167),
-    (35.96703, 127.65896),
-    (35.97905, 127.64504),
-    (35.99240, 127.61059),
-    (35.99635, 127.59336),
-    (36.00126, 127.58590),
-    (36.01231, 127.57950),
-    (36.03345, 127.57270),
-    (36.04402, 127.56624),
-    (36.05698, 127.55172),
-    (36.09779, 127.52182),
-    (36.11075, 127.50908),
-    (36.12130, 127.50605),
-    (36.14625, 127.50638),
-    (36.15483, 127.50017),
-    (36.16309, 127.48638),
-    (36.16879, 127.48321),
-    (36.18940, 127.48764),
-    (36.21337, 127.48704),
-    (36.23637, 127.47820),
-    (36.26607, 127.47127),
-    (36.27155, 127.46685),
-    (36.27846, 127.45279),
-    (36.28139, 127.45200),
+    (35.66334, 127.67628),
+    (35.6739, 127.6665),
+    (35.6861, 127.6594),
+    (35.705, 127.6273),
+    (35.7188, 127.6129),
+    (35.7308, 127.6082),
+    (35.7386, 127.5978),
+    (35.7552, 127.5951),
+    (35.7669, 127.5991),
+    (35.7918, 127.6234),
+    (35.805, 127.6404),
+    (35.8095, 127.6434),
+    (35.8264, 127.6471),
+    (35.8665, 127.6474),
+    (35.872, 127.6498),
+    (35.8873, 127.6616),
+    (35.8967, 127.6648),
+    (35.9126, 127.666),
+    (35.93, 127.6592),
+    (35.9494, 127.6635),
+    (35.9559, 127.6632),
+    (35.9657, 127.6587),
+    (35.9846, 127.6395),
+    (35.9921, 127.6231),
+    (35.9952, 127.5974),
+    (36.0013, 127.5894),
+    (36.0281, 127.5756),
+    (36.0467, 127.5598),
+    (36.0643, 127.5506),
+    (36.0735, 127.5428),
+    (36.0854, 127.5361),
+    (36.1132, 127.5097),
+    (36.126, 127.5091),
+    (36.1371, 127.5121),
+    (36.1421, 127.5114),
+    (36.1561, 127.4945),
+    (36.1682, 127.4847),
+    (36.1799, 127.4872),
+    (36.1917, 127.4851),
+    (36.2099, 127.4909),
+    (36.2436, 127.4749),
+    (36.2621, 127.4757),
+    (36.2669, 127.4723),
+    (36.2781, 127.4544),
+    (36.2814, 127.4525),
+]
+
+# 장수IC(새만금포항선) -> 장수JC(통영대전선과 만나는 곳) 연결 구간. OSM 노선 데이터가 장수IC 근처에서 끝나서, 그 끝점부터 통영대전선까지(약 2.5km)는 직선으로 이었습니다. 실제 연결로 모양과 다를 수 있습니다.
+BRANCHES = [
+    [(35.7155, 127.5877), (35.73188, 127.60676)],
 ]
 
 LABEL_DIR = {"산내JC": "left", "추부IC": "left", "장수JC": "left"}  # 나머지는 오른쪽
@@ -154,6 +166,30 @@ def latest_ultra_base(now):
 
 class NoData(Exception):
     """발표 직후 등으로 해당 발표분 자료가 아직 없을 때"""
+
+
+CACHE_FILE = os.path.join("cache", "short.json")
+SHORT_CACHE = {}
+
+
+def load_short_cache():
+    try:
+        with open(CACHE_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_short_cache(d):
+    """저장해 둔 단기예보. 새로 받아왔을 때만 쓰고, 워크플로가 이 표시를 보고 캐시를 갱신한다"""
+    try:
+        os.makedirs("cache", exist_ok=True)
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        open(os.path.join("cache", "dirty"), "w").close()
+    except Exception as e:
+        print("단기예보 저장 실패:", e)
 
 
 def short_bases(now):
@@ -354,17 +390,19 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
 .chip.u{background:#dbeafe;color:#1e40af}
 .chip.s{background:#e5e7eb;color:#374151}
 .chip.o{background:#fef3c7;color:#92400e}
-#obs{margin-top:8px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:7px 10px;
-  font-size:12px;line-height:1.5;color:#78350f}
-#obs b{color:#92400e}
-#obs .diff{display:block;margin-top:3px;font-weight:800;color:#b45309}
-#obs .pt{box-shadow:0 0 0 1px #fcd34d}
-#panel tr.obsrow td.t{background:#fef3c7;color:#92400e;border-radius:8px 0 0 8px;font-size:11px}
-#panel tr.obsrow td.c{border:2px dashed #f59e0b;box-sizing:border-box}
-#panel tr.obsrow td.c.diff{border:2px solid #dc2626}
+.chip.w{background:#ffedd5;color:#9a3412}
 #upd{cursor:pointer}
 #warn{font-size:12px;font-weight:700;color:#b45309;margin-top:6px;line-height:1.4}
-#meta{font-size:11px;color:#4b5563;margin-top:10px;line-height:1.7;border-top:1px solid #e5e7eb;padding-top:8px}
+#meta{margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.mt{background:#f9fafb;border:1px solid #eef0f3;border-radius:10px;padding:6px 9px;line-height:1.3;min-width:0}
+.mt .chip{margin-left:0}
+.mt .mtt{display:block;margin-top:3px;font-size:17px;font-weight:800;color:#111827;letter-spacing:-.3px}
+.mt .mtt small{font-size:11px;font-weight:700;color:#6b7280;margin-right:3px}
+.mt .mts{display:block;font-size:11px;color:#6b7280}
+.mt .mts b{color:#374151}
+.lg{display:inline-flex;align-items:center;gap:4px;margin-right:9px;white-space:nowrap}
+.lg i{display:inline-block;width:12px;height:12px;border-radius:4px}
+.lgr{margin-top:5px;line-height:1.6}
 #panel td.t.u{box-shadow:inset 4px 0 0 #2563eb}
 #panel td.t.s{box-shadow:inset 4px 0 0 #d1d5db}
 #panel td.sep{font-size:10px;font-weight:800;color:#1e40af;background:#eff6ff;padding:3px 9px;
@@ -380,12 +418,13 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   .pt b,.pt i{font-size:11px}
   .kl{font-size:12px}
   #tmp{margin-top:4px}
-  #obs{margin-top:6px;padding:5px 8px;font-size:11px}
   #head .row{margin-top:8px}
   #head .row button{height:34px}
   #wbar{margin-top:4px;padding:4px 8px;font-size:11px}
   #legend{display:none;margin-top:6px}
-  #meta{margin-top:6px;padding-top:5px;font-size:10.5px;line-height:1.5}
+  #meta{margin-top:6px;padding-top:6px;gap:5px}
+  .mt{padding:5px 8px}
+  .mt .mtt{font-size:15px}
   #head.info #legend{display:block}
   .leaflet-control-zoom{display:none}
   #panel{top:auto;left:0;right:0;bottom:0;max-height:36vh;border-radius:16px 16px 0 0}
@@ -402,11 +441,15 @@ path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
   <div id="sum"></div>
   <div id="wbar"></div>
   <div id="tmp"></div>
-  <div id="obs"></div>
   <div id="warn"></div>
   <div class="row"><button id="prev">◀</button><input type="range" id="rng"><button id="next">▶</button></div>
   <div id="meta"></div>
-  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음<br>큰 숫자는 기온(℃), 작은 글씨는 시간당 강수량(mm)·적설(cm)<br><span style="color:#92400e;font-weight:800">노란 점선 칸</span>=실제 관측 · 시각 옆 <span style="color:#2563eb;font-weight:800">파란 띠</span>=초단기예보, <span style="color:#9ca3af;font-weight:800">회색 띠</span>=단기예보<br>지도 구역색: <span style="color:#b45309;font-weight:800">노랑</span>=특보 주의보, <span style="color:#dc2626;font-weight:800">빨강</span>=특보 경보, 점선=예비특보</div>
+  <div id="legend">
+    <div class="lgr"><span class="lg"><i style="background:#2563eb"></i>눈</span><span class="lg"><i style="background:#7c3aed"></i>비/눈</span><span class="lg"><i style="background:#059669"></i>비</span><span class="lg"><i style="background:#9ca3af"></i>없음</span></div>
+    <div class="lgr">시각 띠 <span class="lg"><i style="background:#2563eb"></i>초단기</span><span class="lg"><i style="background:#9ca3af"></i>단기</span></div>
+    <div class="lgr">특보 구역 <span class="lg"><i style="background:#f59e0b"></i>주의보</span><span class="lg"><i style="background:#dc2626"></i>경보</span><span class="lg"><i style="background:#fff;box-shadow:0 0 0 2px #f59e0b inset"></i>예비특보</span></div>
+    <div class="lgr">큰 숫자 기온(℃) · 작은 글씨 강수량(mm)·적설(cm)</div>
+  </div>
 </div>
 <div id="edit" class="card">
   <h3>📍 위치 수정 모드</h3>
@@ -426,11 +469,10 @@ window.addEventListener('load', function() {
   var MAP = __MAP__;
   var PLACES = __PLACES__, TIMES = __TIMES__, KEYS = __KEYS__, TD = __TD__;
   var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__, ULTRA = __ULTRA__, META = __META__;
-  var ROUTE = __ROUTE__;
+  var ROUTE = __ROUTE__, BRANCH = __BRANCH__;
   var WRN = __WRN__, ZONEGEO = __ZONEGEO__;
   function wet(c) { return c !== '0' && c !== '?' && c !== undefined && c !== null; }
   function kind(c) { return (c === '3' || c === '7') ? 'snow' : (c === '2' || c === '6') ? 'mix' : wet(c) ? 'rain' : 'none'; }
-  var OBSIDX = KEYS.indexOf(META.obs_key);  // 관측 시각이 표에 있으면 예보와 비교
   var ICON = {'3':'❄','7':'❄','2':'🌨','6':'🌨','1':'💧','4':'💧','5':'💧'};
   function amt(p, i) {
     var a = [];
@@ -463,6 +505,13 @@ window.addEventListener('load', function() {
     var ZN = {'함양': '함양군', '장수': '장수군', '무주': '무주군', '금산': '금산군', '대전': '대전'};
     var TI = {'대설': '❄', '호우': '🌧', '강풍': '💨', '한파': '🥶', '건조': '🏜', '안개': '🌫', '폭염': '🔥', '태풍': '🌀', '황사': '😷'};
     function ti(t) { return (TI[t] || '⚠') + ' ' + t; }
+    var TODAY = (function() { var k = new Date(Date.now() + 9 * 3600 * 1000); return ('0' + (k.getUTCMonth() + 1)).slice(-2) + '/' + ('0' + k.getUTCDate()).slice(-2); })();
+    function dt(s) { return !s ? '' : (s.indexOf(TODAY + ' ') === 0 ? s.slice(6) : s); }   // 오늘이면 날짜 생략
+    function wt(a, b) {  // 발표/발효 시각 글자 (둘이 같으면 한 번에)
+      if (!a && !b) return '';
+      if (a && b && a === b) return ' · 발표·발효 ' + dt(a);
+      return ' · ' + (a ? '발표 ' + dt(a) : '') + (a && b ? ' · ' : '') + (b ? '발효 ' + dt(b) : '');
+    }
     try {
       MAP.createPane('zones'); MAP.getPane('zones').style.zIndex = 350;
       Object.keys(ZONEGEO).forEach(function(z) {
@@ -472,8 +521,8 @@ window.addEventListener('load', function() {
         if (w.cur.length) st = {pane: 'zones', color: red ? '#dc2626' : '#f59e0b', weight: 2, fillColor: red ? '#dc2626' : '#f59e0b', fillOpacity: 0.28, opacity: 0.95};
         else if (w.pre.length) st = {pane: 'zones', color: '#f59e0b', weight: 2, dashArray: '6 5', fillColor: '#f59e0b', fillOpacity: 0.08, opacity: 0.95};
         var tip = '<b>' + ZN[z] + '</b>';
-        w.cur.forEach(function(x) { tip += '<br>' + ti(x[0]) + x[1]; });
-        w.pre.forEach(function(x) { tip += '<br>예비 ' + ti(x[0]) + ' ' + x[1]; });
+        w.cur.forEach(function(x) { tip += '<br>' + ti(x[0]) + x[1] + wt(x[2], x[3]); });
+        w.pre.forEach(function(x) { tip += '<br>예비 ' + ti(x[0]) + ' · 발효 예정 ' + x[1] + (x[2] ? ' · 발표 ' + dt(x[2]) + (x[3] ? ' 이전' : '') : ''); });
         if (!w.cur.length && !w.pre.length) tip += ' · 특보 없음';
         L.polygon(ZONEGEO[z], st).addTo(MAP).bindTooltip(tip, {sticky: true});
       });
@@ -482,21 +531,23 @@ window.addEventListener('load', function() {
     var cur = {}, pre = {}, anyRed = false;
     Object.keys(WRN.zones).forEach(function(z) {
       WRN.zones[z].cur.forEach(function(x) {
-        var k = x[0] + x[1]; (cur[k] = cur[k] || []).push(ZN[z]); if (x[1] === '경보') anyRed = true;
+        var k = x[0] + x[1] + wt(x[2], x[3]); (cur[k] = cur[k] || []).push(ZN[z]); if (x[1] === '경보') anyRed = true;
       });
       WRN.zones[z].pre.forEach(function(x) {
-        var k = x[0] + ' ' + x[1]; (pre[k] = pre[k] || []).push(ZN[z]);
+        var k = x[0] + ' 예비특보 · 발효 예정 ' + x[1] + (x[2] ? ' · 발표 ' + dt(x[2]) + (x[3] ? ' 이전' : '') : ''); (pre[k] = pre[k] || []).push(ZN[z]);
       });
     });
     var h = '';
     Object.keys(cur).forEach(function(k) { h += '<div>⚠ <b>' + k + '</b> ' + cur[k].join('·') + '</div>'; });
-    Object.keys(pre).forEach(function(k) { h += '<div>예비특보 ' + k + ' — ' + pre[k].join('·') + '</div>'; });
+    Object.keys(pre).forEach(function(k) { h += '<div>' + k + ' — ' + pre[k].join('·') + '</div>'; });
     var wb = document.getElementById('wbar');
     if (wb) { wb.innerHTML = h; wb.className = anyRed ? 'red' : ''; }
   })();
   if (ROUTE.length > 1 && location.hash !== '#edit') {  // 노선(도로 모양) 표시
     L.polyline(ROUTE, {color: '#ffffff', weight: 8, opacity: 0.9}).addTo(MAP);
+    BRANCH.forEach(function(b) { L.polyline(b, {color: '#ffffff', weight: 8, opacity: 0.9}).addTo(MAP); });
     L.polyline(ROUTE, {color: '#4b5563', weight: 4, opacity: 0.95}).addTo(MAP);
+    BRANCH.forEach(function(b) { L.polyline(b, {color: '#4b5563', weight: 4, opacity: 0.95}).addTo(MAP); });
   }
   var mk = [], rows = [];
   PLACES.forEach(function(p) {
@@ -511,22 +562,6 @@ window.addEventListener('load', function() {
   var h = '<tr><th>시각</th>';
   PLACES.forEach(function(p) { h += '<th>' + p.name + '</th>'; });
   tbl.innerHTML = h + '</tr>';
-  var hasObs = PLACES.some(function(p) { return p.obs; });
-  if (hasObs) {
-    var orow = tbl.insertRow(); orow.className = 'obsrow';
-    var oc0 = orow.insertCell(); oc0.className = 't';
-    oc0.textContent = '관측 ' + (META.obs ? META.obs.slice(-5).slice(0, 2) + '시' : '');
-    PLACES.forEach(function(p, j) {
-      var c = orow.insertCell(); c.className = 'c', o = p.obs;
-      if (!o) { c.textContent = '?'; c.style.background = '#333'; c.style.color = '#fff'; return; }
-      var tp = fmt(o.temp);
-      c.appendChild(document.createTextNode((ICON[o.code] ? ICON[o.code] + ' ' : '') + (tp || '·')));
-      if (o.rain) { var sp = document.createElement('span'); sp.className = 'a'; sp.textContent = o.rain; c.appendChild(sp); }
-      c.style.background = (o.code === '0') ? '#f3f4f6' : COLORS[o.code];
-      c.style.color = (o.code === '0') ? '#6b7280' : '#fff';
-      if (OBSIDX >= 0 && kind(p.codes[OBSIDX]) !== kind(o.code) && p.codes[OBSIDX] !== '?') c.classList.add('diff');
-    });
-  }
   var lastDate = '';
   TD.forEach(function(t, i) {
     if (t[0] !== lastDate) {
@@ -551,7 +586,7 @@ window.addEventListener('load', function() {
       c.style.background = (code === '0') ? '#f3f4f6' : COLORS[code];
       c.style.color = (code === '0') ? '#6b7280' : '#fff';
     });
-    tr.onclick = function() { obsMode = false; show(i); };
+    tr.onclick = function() { show(i); };
     rows.push(tr);
   });
   document.getElementById('scroll').appendChild(tbl);
@@ -593,51 +628,26 @@ window.addEventListener('load', function() {
   var SH = [2, 5, 8, 11, 14, 17, 20, 23].map(function(h) { return h * 60; });
   var UL = []; for (var hh = 0; hh < 24; hh++) UL.push(hh * 60 + 30);
   var ns = nextOf(SH), nu = nextOf(UL);
+  var todayMD = z2(kn.getUTCMonth() + 1) + '/' + z2(kn.getUTCDate());
+  function tm(v) {  // 'MM/DD HH:MM' 에서 오늘 날짜는 생략 (여러 값이면 모두)
+    return String(v).split(' / ').map(function(x) {
+      return x.indexOf(todayMD + ' ') === 0 ? x.slice(6) : '<small>' + x.slice(0, 5) + '</small>' + x.slice(6);
+    }).join(' / ');
+  }
+  function tile(chip, cls, time, sub) {
+    return '<div class="mt"><span class="chip ' + cls + '">' + chip + '</span><span class="mtt">' + time + '</span><span class="mts">' + sub + '</span></div>';
+  }
   var mt = '';
-  mt += '<div><span class="chip u" style="margin-left:0">초단기</span> ' + (META.ultra ? '<b>' + META.ultra + '</b> 발표' + (META.ultra_range ? ' · ' + META.ultra_range : '') : '') +
-        '<br>매시 30분 발표 · 다음 <b>' + (nu.tom ? '내일 ' : '') + nu.t + '</b></div>';
-  mt += '<div><span class="chip s" style="margin-left:0">단기</span> ' + (META.short ? '<b>' + META.short + '</b> 발표' : '') +
-        '<br>3시간마다(02·05·08·11·14·17·20·23시) 발표 · 다음 <b>' + (ns.tom ? '내일 ' : '') + ns.t + '</b></div>';
-  if (META.obs) mt += '<div><span class="chip o" style="margin-left:0">관측</span> <b>' + META.obs + '</b> 기준 (초단기실황, 매시 정각)</div>';
-  mt += '<div style="color:#6b7280">※ 발표 후 이 화면에 반영되기까지 20~30분쯤 걸릴 수 있어요</div>';
-  if (WRN) mt += '<div><span class="chip" style="margin-left:0;background:#fef3c7;color:#92400e">특보</span> <b>' + WRN.tm + '</b> 발표 기준' + (Object.keys(WRN.zones).length ? '' : ' · 노선 지역 특보 없음') + '</div>';
+  var rg = (META.ultra_range || '').match(/(\\d+)시/g);
+  if (META.ultra) mt += tile('초단기', 'u', tm(META.ultra), '다음 <b>' + (nu.tom ? '내일 ' : '') + nu.t + '</b>' + (rg && rg.length > 1 ? ' · ' + rg[0] + '~' + rg[rg.length - 1] : ''));
+  if (META.short) mt += tile('단기', 's', tm(META.short), '다음 <b>' + (ns.tom ? '내일 ' : '') + ns.t + '</b>');
+  if (WRN) mt += tile('특보', 'w', tm(WRN.tm), Object.keys(WRN.zones).length ? '<b style="color:#b45309">노선 지역 ' + Object.keys(WRN.zones).length + '곳 있음</b>' : '노선 지역 없음');
   document.getElementById('meta').innerHTML = mt;
-  (function() {
-    var box = document.getElementById('obs');
-    var ps = PLACES.filter(function(p) { return p.obs; });
-    if (!ps.length) {
-      box.style.display = 'none';
-      return;
-    }
-    var g = {snow: [], mix: [], rain: []}, tt = [], diffs = [];
-    ps.forEach(function(p) {
-      var o = p.obs, k = kind(o.code);
-      if (k !== 'none') g[k].push({n: p.name, a: o.rain || ''});
-      if (o.temp !== null && o.temp !== undefined) tt.push(o.temp);
-      if (OBSIDX >= 0) {
-        var fc = p.codes[OBSIDX];
-        if (fc !== '?' && kind(fc) !== k) {
-          var nm = function(c) { return c === '0' ? '없음' : NAMES[c]; };
-          diffs.push({n: p.name, a: '예보 ' + nm(fc) + ' → 관측 ' + nm(o.code)});
-        }
-      }
-    });
-    var lines = [];
-    if (g.snow.length) lines.push(rowHtml('❄ 눈', g.snow));
-    if (g.mix.length) lines.push(rowHtml('🌨 비/눈', g.mix));
-    if (g.rain.length) lines.push(rowHtml('💧 비', g.rain));
-    if (!lines.length) lines.push('<div>✅ 비·눈 관측 없음</div>');
-    var tr = tt.length ? ' · 기온 ' + fmt(Math.min.apply(null, tt)) + ' ~ ' + fmt(Math.max.apply(null, tt)) : '';
-    var html = '<span class="chip o" style="margin-left:0">관측</span> <b>' + (META.obs ? META.obs.slice(-5) : '') + '</b> 기준' + tr + lines.join('');
-    if (diffs.length) html += '<div class="diff">' + rowHtml('⚠ 예보와 다름', diffs) + '</div>';
-    box.innerHTML = html;
-  })();
   document.getElementById('upd').onclick = function() { head.classList.toggle('info'); };
 
   var mobile0 = window.innerWidth <= 700;
   if (mobile0) { panel.classList.add('min'); grab.textContent = '▴ 시간별 표 보기'; }
   var cur = 0;
-  var obsMode = true;  // 처음 화면은 관측값, 슬라이더/표를 건드리면 예보값
   function show(i) {
     i = Math.max(0, Math.min(TIMES.length - 1, i)); cur = i; rng.value = i;
     document.getElementById('wt').textContent = TIMES[i];
@@ -649,17 +659,14 @@ window.addEventListener('load', function() {
 
     var g = {snow: [], mix: [], rain: [], unk: 0}, temps = [];
     PLACES.forEach(function(p, j) {
-      var code = p.codes[i], tp = p.temps[i];
-      var lab = {n: p.name, a: amt(p, i)};
-      if (code === '3' || code === '7') g.snow.push(lab);
-      else if (code === '2' || code === '6') g.mix.push(lab);
-      else if (code === '1' || code === '4' || code === '5') g.rain.push(lab);
-      else if (code === '?') g.unk++;
-      if (tp !== null && tp !== undefined) temps.push(tp);
-      // 처음 열었을 때는 마커에 관측(초단기실황) 값, 시간을 움직이면 그 시각의 예보 값
-      var useObs = obsMode && p.obs;
-      var mc = useObs ? p.obs.code : code, mt2 = useObs ? p.obs.temp : tp;
-      var ma = useObs ? (p.obs.rain || '') : amt(p, i);
+      var mc = p.codes[i], mt2 = p.temps[i];
+      var ma = amt(p, i);
+      var lab = {n: p.name, a: ma};
+      if (mc === '3' || mc === '7') g.snow.push(lab);
+      else if (mc === '2' || mc === '6') g.mix.push(lab);
+      else if (mc === '1' || mc === '4' || mc === '5') g.rain.push(lab);
+      else if (mc === '?') g.unk++;
+      if (mt2 !== null && mt2 !== undefined) temps.push(mt2);
       mk[j].setStyle({fillColor: COLORS[mc]});
       mk[j].setTooltipContent('<b>' + p.name + '</b> ' + (ICON[mc] ? NAMES[mc] + ' ' : '') + fmt(mt2) + (ICON[mc] && ma ? ' · ' + ma : ''));
     });
@@ -673,9 +680,9 @@ window.addEventListener('load', function() {
     var tmp = document.getElementById('tmp');
     tmp.textContent = temps.length ? ('지점 기온 ' + fmt(Math.min.apply(null, temps)) + ' ~ ' + fmt(Math.max.apply(null, temps))) : '';
   }
-  rng.oninput = function() { obsMode = false; show(parseInt(rng.value)); };
-  document.getElementById('prev').onclick = function() { obsMode = false; show(cur - 1); };
-  document.getElementById('next').onclick = function() { obsMode = false; show(cur + 1); };
+  rng.oninput = function() { show(parseInt(rng.value)); };
+  document.getElementById('prev').onclick = function() { show(cur - 1); };
+  document.getElementById('next').onclick = function() { show(cur + 1); };
 
   // 열어 본 '지금' 시각(한국시간)에 맞는 줄을 처음에 선택
   function z(n) { return ('0' + n).slice(-2); }
@@ -686,8 +693,8 @@ window.addEventListener('load', function() {
   show(start);
 
   // 10분마다 새로고침 (위치 수정 모드에서는 하지 않음)
-  // 5분마다 새로고침 (주소 뒤에 시각을 붙여 브라우저/CDN에 저장된 옛날 화면을 피함)
-  setTimeout(function() { if (location.hash !== '#edit') location.replace(location.pathname + '?t=' + Date.now()); }, 300000);
+  // 2분마다 새로고침 (서버는 5분마다 갱신되고 빌드·배포에 1~2분 걸려서, 2분 간격이면 새 자료가 올라온 뒤 늦어도 2분 안에 반영) (주소 뒤에 시각을 붙여 브라우저/CDN에 저장된 옛날 화면을 피함)
+  setTimeout(function() { if (location.hash !== '#edit') location.replace(location.pathname + '?t=' + Date.now()); }, 120000);
 
   // 핀 7개가 카드/표에 가려지지 않게 화면 맞춤
   try {
@@ -816,6 +823,95 @@ def parse_warnings(item):
     return res
 
 
+MSG_URL = "https://apis.data.go.kr/1360000/WthrWrnInfoService/getWthrWrnMsg"
+EV_LINE = re.compile(r"^\((\d+)\)\s*(.+?)\s*:\s*(.+)$")
+
+
+def _fc_str(v):
+    """202611232110 -> '11/23 21:10'"""
+    t = str(v)
+    return f"{t[4:6]}/{t[6:8]} {t[8:10]}:{t[10:12]}" if len(t) >= 12 else ""
+
+
+def _kor_time(v):
+    """'2026년 11월 23일 21시 00분' -> '11/23 21:00'"""
+    m = re.search(r"(\d+)년\s*(\d+)월\s*(\d+)일\s*(\d+)시\s*(\d+)분", v or "")
+    return f"{int(m.group(2)):02d}/{int(m.group(3)):02d} {int(m.group(4)):02d}:{int(m.group(5)):02d}" if m else ""
+
+
+def msg_events(item):
+    """통보문 한 건에서 [(종류, 단계, 발표/해제, 우리 구역들, 발효시각)] 을 뽑는다"""
+    times = {}
+    for line in re.split(r"[\r\n]+", str(item.get("t3", ""))):
+        m = EV_LINE.match(line.strip())
+        if m:
+            times[int(m.group(1))] = _kor_time(m.group(3))
+    out = []
+    for line in re.split(r"[\r\n]+", str(item.get("t2", ""))):
+        m = EV_LINE.match(line.strip())
+        if not m:
+            continue
+        a = re.match(r"^(.+?)(주의보|경보)\s*(.*)$", m.group(2))
+        if not a:
+            continue
+        action = "off" if "해제" in a.group(3) else ("on" if "발표" in a.group(3) else "")
+        zs = zones_in(m.group(3))
+        if action and zs:
+            out.append((a.group(1).strip(), a.group(2), action, zs, times.get(int(m.group(1)), "")))
+    return out
+
+
+def enrich_warnings(zones, msgs):
+    """현재 특보/예비특보에 발표시각·발효시각을 붙인다.
+    msgs: 통보문 목록(오래된 것 -> 최신). 현재 특보는 [종류, 단계, 발표, 발효], 예비특보는 [종류, 발효예정, 발표, 이전여부]"""
+    last_on = {}
+    for it in msgs:
+        fc = _fc_str(it.get("tmFc", ""))
+        for typ, lvl, action, zs, eff in msg_events(it):
+            for z in zs:
+                if action == "on":
+                    last_on[(z, typ, lvl)] = (fc, eff)
+                else:
+                    last_on.pop((z, typ, lvl), None)
+    for z, d in zones.items():
+        for x in d["cur"]:
+            got = last_on.get((z, x[0], x[1]))
+            x += list(got) if got else ["", ""]
+        for x in d["pre"]:
+            first, older = "", False
+            for k in range(len(msgs) - 1, -1, -1):  # 최신부터 거슬러 올라가 처음 나온 통보문을 찾음
+                pw = parse_warnings(msgs[k]).get(z, {"pre": []})["pre"]
+                if [x[0], x[1]] in [y[:2] for y in pw]:
+                    first, older = _fc_str(msgs[k].get("tmFc", "")), (k == 0)
+                else:
+                    break
+            x += [first, older]
+    return zones
+
+
+def fetch_warn_msgs():
+    """최근 이틀치 특보 통보문(전국 108). 실패하면 빈 목록 -> 시각 없이 표시"""
+    now = now_kst()
+    params = {"serviceKey": SERVICE_KEY, "pageNo": 1, "numOfRows": 100, "dataType": "JSON", "stnId": 108,
+              "fromTmFc": (now - timedelta(days=1)).strftime("%Y%m%d"), "toTmFc": now.strftime("%Y%m%d")}
+    for attempt in range(2):
+        try:
+            r = requests.get(MSG_URL, params=params, timeout=25)
+            r.raise_for_status()
+            j = r.json()
+            if j["response"]["header"]["resultCode"] != "00":
+                raise RuntimeError(j["response"]["header"].get("resultMsg", ""))
+            items = j["response"]["body"]["items"]["item"]
+            if isinstance(items, dict):
+                items = [items]
+            items.sort(key=lambda x: (int(x.get("tmFc", 0)), int(x.get("tmSeq", 0))))
+            return items
+        except Exception as e:
+            print(f"특보 통보문 조회 실패({attempt + 1}/2): {e}")
+            time.sleep(2)
+    return []
+
+
 def fetch_warnings():
     """기상특보 현황 통보문 중 가장 최근 발표분을 읽는다. 실패하면 None (화면에는 특보 표시를 하지 않음)"""
     params = {"serviceKey": SERVICE_KEY, "pageNo": 1, "numOfRows": 10, "dataType": "JSON"}
@@ -833,7 +929,12 @@ def fetch_warnings():
             it = items[-1]
             tm = str(it.get("tmFc", ""))
             when = f"{tm[4:6]}/{tm[6:8]} {tm[8:10]}:{tm[10:12]}" if len(tm) >= 12 else ""
-            return {"tm": when, "zones": parse_warnings(it)}
+            zones = parse_warnings(it)
+            try:
+                zones = enrich_warnings(zones, fetch_warn_msgs())
+            except Exception as e:
+                print("특보 시각 정리 실패:", e)
+            return {"tm": when, "zones": zones}
         except Exception as e:
             print(f"특보 조회 실패({attempt + 1}/3): {e}")
             time.sleep(2)
@@ -846,6 +947,8 @@ def main():
     limit = now + timedelta(hours=HOURS_AHEAD)
     sbases, ubases, obases = short_bases(now), ultra_bases(now), obs_bases(now)
     last_obs_err = None
+    SHORT_CACHE.update(load_short_cache())
+    FRESH = set()
     print(f"현재(한국시간) {now:%m/%d %H:%M} / 단기예보 후보 {sbases} / 초단기예보 후보 {ubases}\n")
     if not SERVICE_KEY:
         print("인증키가 없습니다. key.txt 에 키를 저장하거나 SERVICE_KEY 환경변수를 설정하세요.")
@@ -861,10 +964,27 @@ def main():
                 last = e
         raise last
 
+    def short_for(name, nx, ny):
+        """단기예보는 3시간마다만 바뀌므로, 새 발표가 있을 때만 부르고 나머지는 저장해 둔 값을 쓴다"""
+        c = SHORT_CACHE.get(name)
+        if c and tuple(c["base"]) == sbases[0]:
+            return {(a, b): (v, t, r, sn) for a, b, v, t, r, sn in c["rows"]}, sbases[0], 0
+        try:
+            rows = _fetch("getVilageFcst", nx, ny, sbases[0][0], sbases[0][1], 2000)
+            base, idx = sbases[0], 0
+        except Exception as e:
+            if c:  # 새 발표가 아직 없거나 실패 -> 저장해 둔 이전 값
+                return {(a, b): (v, t, r, sn) for a, b, v, t, r, sn in c["rows"]}, tuple(c["base"]), 1
+            rows = _fetch("getVilageFcst", nx, ny, sbases[1][0], sbases[1][1], 2000)
+            base, idx = sbases[1], 1
+        SHORT_CACHE[name] = {"base": list(base), "rows": [[a, b, *v] for (a, b), v in rows.items()]}
+        FRESH.add(name)
+        return dict(rows), base, idx
+
     def load(name):
         lat, lon = PLACES[name]
         nx, ny = latlon_to_grid(lat, lon)
-        merged, sb, sidx = fetch_first("getVilageFcst", nx, ny, sbases, 2000)
+        merged, sb, sidx = short_for(name, nx, ny)
         ub, uidx, ukeys = None, 0, set()
         try:  # 가까운 6시간은 초단기예보로 덮어쓰기 (더 정확). 적설은 초단기에 없어 단기값 유지
             ultra, ub, uidx = fetch_first("getUltraSrtFcst", nx, ny, ubases, 100)
@@ -890,6 +1010,21 @@ def main():
         return {"nx": nx, "ny": ny, "per": per, "sb": sb, "sidx": sidx, "ub": ub, "uidx": uidx, "ukeys": ukeys,
                 "obs": obs, "ob": ob, "oidx": oidx}
 
+    # 초단기예보 발표(:30) 직후라면, 새 자료가 올라올 때까지 최대 4분 기다리며 1분마다 확인 (다음 5분 실행을 기다리지 않도록)
+    if 30 <= now.minute < 55:
+        first = next(iter(PLACES))
+        fx, fy = latlon_to_grid(*PLACES[first])
+        for k in range(4):
+            try:
+                _fetch("getUltraSrtFcst", fx, fy, ubases[0][0], ubases[0][1], 10)
+                break
+            except NoData:
+                if k < 3:
+                    print(f"초단기예보 {ubases[0][1]} 발표 대기 중 ({k + 1}/3)")
+                    time.sleep(60)
+            except Exception:
+                break
+
     results, pending = {}, list(PLACES)
     for rnd in range(3):  # 실패한 지점은 잠시 뒤 최대 2번 더 시도
         failed = []
@@ -907,6 +1042,8 @@ def main():
             print(f"-> {len(pending)}곳 실패, 잠시 뒤 다시 시도: {', '.join(pending)}")
             time.sleep(10)
 
+    if FRESH:
+        save_short_cache(SHORT_CACHE)
     data = {}
     for name in PLACES:
         if name not in results:
@@ -967,22 +1104,36 @@ def main():
         o = results.get(n, {}).get("obs")
         if o:
             print(f"  관측 {n}: {PTY_NAME.get(o['code'], o['code'])} {o['temp']}°" + (f" 강수 {o['rain']}" if o["rain"] else ""))
+    # 관측(정시 기준)이 그 지점의 초단기예보(30분 발표)보다 나중 시각이면, 관측 시각의 값을 관측값으로 바꿔 넣는다
+    for n in PLACES:
+        r = results.get(n)
+        if not r or r["obs"] is None or r["ob"] is None:
+            continue
+        k = r["ob"][0] + r["ob"][1][:2]
+        if k not in keys:
+            continue
+        obs_dt = datetime.strptime(r["ob"][0] + r["ob"][1], "%Y%m%d%H%M")
+        if r["ub"] is not None and datetime.strptime(r["ub"][0] + r["ub"][1], "%Y%m%d%H%M") >= obs_dt:
+            continue  # 예보가 더 최신이면 예보를 그대로 사용
+        o = r["obs"]
+        old = data[n].get(k, ("?", None, "", ""))
+        snow_amt = old[3] if o["code"] in ("3", "7") else ""
+        data[n][k] = (o["code"], o["temp"], o["rain"] or "", snow_amt)
     places_js = [{"name": n, "lat": la, "lon": lo,
                   "codes": [data[n].get(k, ("?", None, "", ""))[0] for k in keys],
                   "temps": [data[n].get(k, ("?", None, "", ""))[1] for k in keys],
                   "rain": [data[n].get(k, ("?", None, "", ""))[2] for k in keys],
-                  "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys],
-                  "obs": results[n]["obs"] if n in results else None}
+                  "snow": [data[n].get(k, ("?", None, "", ""))[3] for k in keys]}
                  for n, (la, lo) in PLACES.items()]
 
     m = folium.Map(location=[36.0, 127.55], zoom_start=9, tiles=None, zoom_control=False)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri", no_wrap=True, max_zoom=17,
+        attr="Esri · 노선 © OpenStreetMap contributors (ODbL)", name="Esri", no_wrap=True, max_zoom=17,
     ).add_to(m)
     m.get_root().header.add_child(folium.Element(
         '<title>기상정보</title>'))
-    m.get_root().html.add_child(folium.Element(UI.replace("__UPDATED__", f"ⓘ 수집 {now:%m/%d %H:%M}")))
+    m.get_root().html.add_child(folium.Element(UI.replace("__UPDATED__", f"ⓘ 수집 {now:%m/%d %H:%M} · 2분마다 새로고침")))
     js = (JS.replace("__PLACES__", json.dumps(places_js, ensure_ascii=False))
             .replace("__TIMES__", json.dumps(times, ensure_ascii=False))
             .replace("__KEYS__", json.dumps(keys))
@@ -994,6 +1145,7 @@ def main():
             .replace("__DIRS__", json.dumps(LABEL_DIR, ensure_ascii=False))
             .replace("__WRN__", json.dumps(wrn, ensure_ascii=False))
             .replace("__ZONEGEO__", json.dumps(ZONES_GEO, ensure_ascii=False))
+            .replace("__BRANCH__", json.dumps(BRANCHES))
             .replace("__ROUTE__", json.dumps(ROUTE))
             .replace("__MAP__", m.get_name()))
     m.get_root().html.add_child(folium.Element("<script>" + js + "</script>"))
